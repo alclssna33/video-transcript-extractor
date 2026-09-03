@@ -1,0 +1,11 @@
+{
+  "id": "transcribe-1",
+  "status": "completed",
+  "results": {
+    "utterances": [
+      {"start_at": 3000, "duration": 2400, "msg": "안녕하세요, 오늘 주간회의 시작하겠습니다.", "spk": 0, "lang": "ko"},
+      {"start_at": 11000, "duration": 3100, "msg": "네, 지난주 진행상황부터 말씀드리겠습니다.", "spk": 1, "lang": "ko"},
+      {"start_at": 3723000, "duration": 1500, "msg": "다음 안건으로 넘어가죠.", "spk": 0, "lang": "ko"}
+    ]
+  }
+}
