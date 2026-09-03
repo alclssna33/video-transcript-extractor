@@ -66,10 +66,16 @@ def extract_audio(source: Path, dest: Path) -> Path:
     return dest
 
 
-def download_url(url: str, dest_dir: Path) -> Path:
-    """yt-dlp로 영상을 내려받고 저장된 파일 경로를 반환한다."""
+def download_url(url: str, dest_dir: Path, *, filename_stem: str | None = None) -> Path:
+    """yt-dlp로 영상을 내려받고 저장된 파일 경로를 반환한다.
+
+    filename_stem이 주어지면 그 이름으로 저장한다 — 호출자(워커)가 job_id를
+    넘기면, 나중에 media_dir에서 job_id 기준 정리(glob)로 함께 지울 수 있다.
+    지정하지 않으면 영상 자체의 id(yt-dlp %(id)s)를 사용한다.
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
-    template = str(dest_dir / "%(id)s.%(ext)s")
+    stem = filename_stem if filename_stem else "%(id)s"
+    template = str(dest_dir / f"{stem}.%(ext)s")
     _run([sys.executable, "-m", "yt_dlp", "-o", template, "--no-playlist",
           "--print-to-file", "%(filepath)s", str(dest_dir / "_last_path.txt"), url])
 

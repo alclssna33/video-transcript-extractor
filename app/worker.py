@@ -104,7 +104,7 @@ class Worker:
 
         source = Path(job["source"])
         if job["source_type"] == "url":
-            source = download_url(job["source"], self._media_dir)
+            source = download_url(job["source"], self._media_dir, filename_stem=job["id"])
 
         duration = probe_duration(source)
         audio_path = self._media_dir / f"{job['id']}.m4a"

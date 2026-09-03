@@ -323,6 +323,29 @@ def test_media_files_are_cleaned_up_after_success(workspace):
     assert (root / "raw" / f"{job_id}.json").exists(), "raw JSON은 영구 보관한다"
 
 
+def test_media_files_are_cleaned_up_after_success_for_url_source(workspace, monkeypatch):
+    """URL로 받은 원본 영상도 job_id 기반 파일명으로 저장되어 정리 대상에 포함되어야 한다."""
+    conn, root = workspace
+
+    def fake_download_url(url, dest_dir, *, filename_stem=None):
+        downloaded = dest_dir / f"{filename_stem}.mp4"
+        downloaded.write_bytes(b"downloaded video")
+        return downloaded
+
+    monkeypatch.setattr("app.worker.download_url", fake_download_url)
+
+    job_id = create_job(
+        conn, title="t", source="https://example.com/video", source_type="url"
+    )
+
+    make_worker(conn, root).process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "done"
+    leftover = list((root / "media").glob(f"{job_id}.*"))
+    assert leftover == [], f"정리되지 않은 파일이 남아있습니다: {leftover}"
+
+
 def test_stalled_job_completes_on_retry_without_resubmitting(workspace):
     conn, root = workspace
     source = root / "weekly.mp4"
