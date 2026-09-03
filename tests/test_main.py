@@ -174,3 +174,26 @@ def test_inbox_files_are_picked_up(tmp_path, monkeypatch):
         titles = [job["title"] for job in list_jobs(client.app.state.conn)]
 
     assert "강의녹화" in titles
+
+
+def test_inbox_file_is_not_duplicated_on_restart(tmp_path, monkeypatch):
+    """두 번째 앱 시작에서 같은 inbox 파일에 대해 job이 다시 만들어지면 안 된다."""
+    monkeypatch.setenv("RTZR_CLIENT_ID", "cid")
+    monkeypatch.setenv("RTZR_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(
+        "app.worker.extract_audio", lambda source, dest: (Path(dest).write_bytes(b"a"), Path(dest))[1]
+    )
+    monkeypatch.setattr("app.worker.probe_duration", lambda path: 60.0)
+
+    inbox = tmp_path / "data" / "inbox"
+    inbox.mkdir(parents=True)
+    (inbox / "강의녹화.mp4").write_bytes(b"video")
+
+    with TestClient(create_app(asr=FakeAsr(), poll_interval=0)) as client:
+        pass  # 첫 시작에서 job 생성됨
+
+    with TestClient(create_app(asr=FakeAsr(), poll_interval=0)) as client:
+        titles = [job["title"] for job in list_jobs(client.app.state.conn)]
+
+    assert titles.count("강의녹화") == 1
