@@ -51,11 +51,15 @@ def extract_audio(source: Path, dest: Path) -> Path:
         )
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    _run([
-        "ffmpeg", "-y", "-i", str(source),
-        "-vn", "-ac", "1", "-c:a", "aac", "-b:a", "48k",
-        str(dest),
-    ])
+    try:
+        _run([
+            "ffmpeg", "-y", "-i", str(source),
+            "-vn", "-ac", "1", "-c:a", "aac", "-b:a", "48k",
+            str(dest),
+        ])
+    except ExtractError:
+        dest.unlink(missing_ok=True)
+        raise
 
     if dest.stat().st_size > MAX_UPLOAD_BYTES:
         raise ExtractError("추출된 오디오가 2GB를 초과했습니다.")
@@ -72,7 +76,10 @@ def download_url(url: str, dest_dir: Path) -> Path:
     pointer = dest_dir / "_last_path.txt"
     if not pointer.exists():
         raise ExtractError("yt-dlp가 다운로드 경로를 보고하지 않았습니다.")
-    downloaded = Path(pointer.read_text(encoding="utf-8").strip().splitlines()[-1])
+    lines = pointer.read_text(encoding="utf-8").strip().splitlines()
+    if not lines:
+        raise ExtractError("yt-dlp가 다운로드 경로를 보고하지 않았습니다.")
+    downloaded = Path(lines[-1])
     pointer.unlink(missing_ok=True)
 
     if not downloaded.exists():
