@@ -28,8 +28,14 @@ def transcript_filename(date_iso: str, title: str) -> str:
     return f"{date_part}-{safe_title or 'untitled'}.md"
 
 
+def _yaml_str(value: str) -> str:
+    """콜론·따옴표·개행이 있어도 안전하도록 YAML 큰따옴표 스칼라로 감싼다."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+    return f'"{escaped}"'
+
+
 def _yaml_list(values: list[str]) -> str:
-    return "[" + ", ".join(values) + "]"
+    return "[" + ", ".join(_yaml_str(v) for v in values) + "]"
 
 
 def render_markdown(*, meta: dict, raw: dict, speaker_map: dict[str, str]) -> str:
@@ -37,14 +43,14 @@ def render_markdown(*, meta: dict, raw: dict, speaker_map: dict[str, str]) -> st
     duration_sec = float(meta.get("duration_sec") or 0)
 
     speakers_block = "\n".join(
-        f'  "{key}": {value}' for key, value in sorted(speaker_map.items())
+        f'  "{key}": {_yaml_str(value)}' for key, value in sorted(speaker_map.items())
     )
     frontmatter = [
         "---",
         f"id: {meta['id']}",
-        f"title: {meta['title']}",
+        f"title: {_yaml_str(meta['title'])}",
         f"date: {meta['date']}",
-        f"source: {meta['source']}",
+        f"source: {_yaml_str(meta['source'])}",
         f'duration: "{format_timestamp(int(duration_sec * 1000))}"',
         "asr_provider: rtzr",
         "asr_model: sommers",

@@ -42,13 +42,21 @@ def test_render_writes_frontmatter_and_warning():
     markdown = render_markdown(meta=META, raw=FIXTURE, speaker_map={"0": "김팀장"})
     header = markdown.split("---")[1]
 
-    assert "title: 주간회의" in header
+    assert 'title: "주간회의"' in header
     assert "asr_provider: rtzr" in header
     assert "asr_model: sommers" in header
     assert "language: ko" in header
     assert 'duration: "01:03:12"' in header
     assert "estimated_cost_krw: 1053" in header
     assert "자동 생성된 전사본" in markdown
+
+
+def test_render_escapes_yaml_special_characters_in_title():
+    meta = {**META, "title": '기획: "2차" 회의'}
+    markdown = render_markdown(meta=meta, raw=FIXTURE, speaker_map={})
+    header = markdown.split("---")[1]
+
+    assert 'title: "기획: \\"2차\\" 회의"' in header
 
 
 def test_each_utterance_is_one_line():
