@@ -195,3 +195,15 @@ def test_poll_raises_temporary_error_on_429():
 
     with pytest.raises(AsrTemporaryError):
         client.poll("x")
+
+
+def test_poll_raises_temporary_error_on_5xx():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/authenticate":
+            return auth_response()
+        return httpx.Response(503, json={"error": "service unavailable"})
+
+    client = make_client(handler)
+
+    with pytest.raises(AsrTemporaryError):
+        client.poll("x")
