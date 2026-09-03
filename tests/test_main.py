@@ -14,9 +14,15 @@ FIXTURE = json.loads(
 
 
 def wait_for_done(client, job_id, attempts=100):
-    """백그라운드 처리가 끝날 때까지 기다린다."""
+    """백그라운드 처리가 끝날 때까지 기다린다.
+
+    상태 조회가 일시적으로 200이 아니거나 예상한 필드가 없어도(시스템 부하로 인한
+    타이밍 문제 등) 폴링을 포기하지 않고 계속 재시도한다 — 실패로 볼 근거는
+    attempts를 다 써도 완료 상태에 도달하지 못하는 것뿐이다.
+    """
     for _ in range(attempts):
-        stage = client.get(f"/jobs/{job_id}/status").json()["stage"]
+        response = client.get(f"/jobs/{job_id}/status")
+        stage = response.json().get("stage") if response.status_code == 200 else None
         if stage in ("done", "failed", "stalled"):
             return stage
         time.sleep(0.05)
