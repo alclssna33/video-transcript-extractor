@@ -189,6 +189,39 @@ def test_resuming_after_mid_poll_crash_does_not_resubmit(workspace):
     assert len(asr.submitted) == 1  # submit()은 딱 한 번만 호출됐어야 함
 
 
+def test_resuming_from_fetched_stage_does_not_repoll(workspace):
+    """raw JSON이 이미 있으면 poll()을 다시 부르지 않고 바로 markdown을 만들어야 한다."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="주간회의", source=str(source), source_type="file")
+
+    # 미리 fetched 단계까지 도달한 상태를 만든다: raw JSON을 직접 써두고 stage를 fetched로 설정
+    raw_path = root / "raw" / f"{job_id}.json"
+    raw_path.write_text(json.dumps(FIXTURE, ensure_ascii=False), encoding="utf-8")
+    update_job(
+        conn, job_id,
+        stage="fetched",
+        audio_path=str(root / "media" / f"{job_id}.m4a"),
+        rtzr_transcribe_id="transcribe-1",
+        duration_sec=3792.0,
+    )
+
+    class ForbiddenAsr(FakeAsr):
+        def submit(self, *args, **kwargs):
+            raise AssertionError("fetched 단계에서는 submit()이 호출되면 안 된다")
+
+        def poll(self, transcribe_id):
+            raise AssertionError("fetched 단계에서는 poll()이 호출되면 안 된다")
+
+    worker = make_worker(conn, root, asr=ForbiddenAsr())
+    worker.process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "done"
+    assert Path(job["md_path"]).exists()
+
+
 def test_write_markdown_adds_suffix_on_filename_collision(workspace):
     conn, root = workspace
     source_a = root / "a.mp4"
@@ -211,15 +244,25 @@ def test_write_markdown_adds_suffix_on_filename_collision(workspace):
     assert path_b.exists()
 
 
-def test_regenerate_reuses_same_md_path(workspace):
+def test_regenerate_does_not_invoke_collision_logic(workspace, monkeypatch):
     conn, root = workspace
     source = root / "weekly.mp4"
     source.write_bytes(b"video")
     job_id = create_job(conn, title="주간회의", source=str(source), source_type="file")
     worker = make_worker(conn, root)
     worker.process(job_id)
-
     original_path = get_job(conn, job_id)["md_path"]
+
+    calls = []
+    original_method = worker._unique_transcript_path
+
+    def spy(*args, **kwargs):
+        calls.append(1)
+        return original_method(*args, **kwargs)
+
+    monkeypatch.setattr(worker, "_unique_transcript_path", spy)
+
     worker.regenerate(job_id, speaker_map={"0": "김팀장"})
 
+    assert calls == []  # 기존 경로를 재사용했으니 접미사 로직은 아예 호출되지 않아야 한다
     assert get_job(conn, job_id)["md_path"] == original_path
