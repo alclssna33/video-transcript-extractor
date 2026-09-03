@@ -1,0 +1,160 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from app.db import connect, create_job, get_job, init_db, update_job
+from app.worker import Worker
+
+FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "rtzr_response.json").read_text(encoding="utf-8")
+)
+
+
+class FakeAsr:
+    """RTZR 대역. 제출 즉시 완료된 것으로 응답한다."""
+
+    def __init__(self, payload=FIXTURE):
+        self.payload = payload
+        self.submitted = []
+
+    def submit(self, audio_path, *, keywords=None, spk_count=None):
+        self.submitted.append((Path(audio_path).name, keywords, spk_count))
+        return "transcribe-1"
+
+    def poll(self, transcribe_id):
+        return self.payload
+
+
+@pytest.fixture
+def workspace(tmp_path, monkeypatch):
+    conn = connect(tmp_path / "jobs.db")
+    init_db(conn)
+    for name in ("transcripts", "raw", "media"):
+        (tmp_path / name).mkdir()
+
+    def fake_extract(source, dest):
+        Path(dest).write_bytes(b"audio")
+        return Path(dest)
+
+    monkeypatch.setattr("app.worker.extract_audio", fake_extract)
+    monkeypatch.setattr("app.worker.probe_duration", lambda path: 3792.0)
+    return conn, tmp_path
+
+
+def make_worker(conn, tmp_path, asr=None):
+    return Worker(
+        conn=conn,
+        asr=asr or FakeAsr(),
+        transcripts_dir=tmp_path / "transcripts",
+        raw_dir=tmp_path / "raw",
+        media_dir=tmp_path / "media",
+        poll_interval=0,
+    )
+
+
+def test_process_job_writes_raw_json_and_markdown(workspace, tmp_path):
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="주간회의", source=str(source), source_type="file")
+
+    make_worker(conn, root).process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "done"
+    assert Path(job["md_path"]).exists()
+    assert (root / "raw" / f"{job_id}.json").exists()
+    assert "주간회의" in Path(job["md_path"]).read_text(encoding="utf-8")
+
+
+def test_process_job_saves_transcribe_id_immediately(workspace, tmp_path):
+    """재시작 복구의 핵심. 제출 직후 id가 DB에 있어야 한다."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
+
+    class RecordingAsr(FakeAsr):
+        def __init__(self, conn, job_id):
+            super().__init__()
+            self.conn = conn
+            self.job_id = job_id
+            self.id_at_poll_time = None
+
+        def poll(self, transcribe_id):
+            self.id_at_poll_time = get_job(self.conn, self.job_id)["rtzr_transcribe_id"]
+            return self.payload
+
+    asr = RecordingAsr(conn, job_id)
+    make_worker(conn, root, asr=asr).process(job_id)
+
+    assert asr.id_at_poll_time == "transcribe-1"
+
+
+def test_process_job_passes_keywords_and_spk_count(workspace):
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(
+        conn, title="t", source=str(source), source_type="file",
+        keywords=["개비공"], spk_count=2,
+    )
+    asr = FakeAsr()
+
+    make_worker(conn, root, asr=asr).process(job_id)
+
+    assert asr.submitted[0][1] == ["개비공"]
+    assert asr.submitted[0][2] == 2
+
+
+def test_failed_job_records_error_and_does_not_raise(workspace):
+    conn, root = workspace
+    job_id = create_job(
+        conn, title="t", source=str(root / "없는파일.mp4"), source_type="file"
+    )
+
+    class ExplodingAsr(FakeAsr):
+        def submit(self, *args, **kwargs):
+            raise RuntimeError("boom")
+
+    make_worker(conn, root, asr=ExplodingAsr()).process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "failed"
+    assert "boom" in job["last_error"]
+
+
+def test_recover_resets_incomplete_stages_to_pending(workspace):
+    conn, root = workspace
+    job_id = create_job(conn, title="t", source="s", source_type="file")
+    update_job(conn, job_id, stage="extracted")
+
+    make_worker(conn, root).recover()
+
+    assert get_job(conn, job_id)["stage"] == "pending"
+
+
+def test_recover_keeps_submitted_jobs_for_polling(workspace):
+    conn, root = workspace
+    job_id = create_job(conn, title="t", source="s", source_type="file")
+    update_job(conn, job_id, stage="submitted", rtzr_transcribe_id="transcribe-1")
+
+    make_worker(conn, root).recover()
+
+    assert get_job(conn, job_id)["stage"] == "submitted"
+
+
+def test_regenerate_markdown_applies_new_speaker_names(workspace):
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="주간회의", source=str(source), source_type="file")
+    worker = make_worker(conn, root)
+    worker.process(job_id)
+
+    worker.regenerate(job_id, speaker_map={"0": "김팀장", "1": "이대리"})
+
+    markdown = Path(get_job(conn, job_id)["md_path"]).read_text(encoding="utf-8")
+    assert "**[김팀장]" in markdown
+    assert "화자 1" not in markdown
