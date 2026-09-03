@@ -3,7 +3,7 @@ import time
 import httpx
 import pytest
 
-from app.asr_client import AsrAuthError, RtzrClient
+from app.asr_client import AsrAuthError, AsrPermanentError, RtzrClient
 
 
 def make_client(handler) -> RtzrClient:
@@ -54,4 +54,24 @@ def test_bad_credentials_raise_auth_error():
     client = make_client(handler)
 
     with pytest.raises(AsrAuthError):
+        client.token()
+
+
+def test_malformed_json_response_raises_permanent_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"not json")
+
+    client = make_client(handler)
+
+    with pytest.raises(AsrPermanentError):
+        client.token()
+
+
+def test_missing_access_token_raises_permanent_error():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"expire_at": 9999999999})
+
+    client = make_client(handler)
+
+    with pytest.raises(AsrPermanentError):
         client.token()

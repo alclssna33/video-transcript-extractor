@@ -56,8 +56,15 @@ class RtzrClient:
         if response.status_code != 200:
             raise AsrPermanentError(f"인증 실패 {response.status_code}: {response.text}")
 
-        payload = response.json()
-        self._token = payload["access_token"]
+        try:
+            payload = response.json()
+        except json.JSONDecodeError as exc:
+            raise AsrPermanentError(f"RTZR 응답이 JSON이 아닙니다: {exc}") from exc
+
+        access_token = payload.get("access_token")
+        if not access_token:
+            raise AsrPermanentError("RTZR 응답에 access_token이 없습니다.")
+        self._token = access_token
         expire_at = payload.get("expire_at")
         self._expires_at = (
             float(expire_at) - TOKEN_REFRESH_MARGIN_SEC
