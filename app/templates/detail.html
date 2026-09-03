@@ -11,6 +11,15 @@
 <pre class="warn">{{ job['last_error'] }}</pre>
 {% endif %}
 
+{% if job['stage'] in ('stalled', 'failed') %}
+<form method="post" action="/jobs/{{ job['id'] }}/retry">
+  <button type="submit">다시 확인</button>
+  <span class="hint">
+    전사 결과는 제출 후 3일간만 보관됩니다. 그 이후에는 재제출(재과금)이 필요합니다.
+  </span>
+</form>
+{% endif %}
+
 {% if utterances %}
 <div class="warn">
   자동 생성된 전사본입니다. 인식 오류가 포함될 수 있습니다.

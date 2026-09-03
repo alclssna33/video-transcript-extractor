@@ -145,6 +145,14 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
         await asyncio.to_thread(worker.regenerate, job_id, speaker_map=speaker_map)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
+    @app.post("/jobs/{job_id}/retry")
+    async def retry(job_id: str):
+        job = get_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+        _schedule(app, job_id)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
     return app
 
 

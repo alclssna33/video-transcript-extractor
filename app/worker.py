@@ -2,7 +2,7 @@
 import json
 import sqlite3
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.asr_client import AsrTemporaryError
@@ -45,6 +45,16 @@ class Worker:
                 # (3일 지나 결과가 만료된 뒤에도 로컬 결과로 markdown을 만들 수 있어야 한다)
                 payload = json.loads(raw_path.read_text(encoding="utf-8"))
             else:
+                if self._is_expired(job):
+                    update_job(
+                        self._conn, job_id, stage="failed",
+                        last_error=(
+                            f"제출한 지 {RESULT_RETENTION_DAYS}일이 지나 RTZR 서버에서 "
+                            "결과가 삭제되었습니다. 재제출(재과금)이 필요합니다."
+                        ),
+                    )
+                    return
+
                 audio_path = self._ensure_audio(job)
                 transcribe_id = self._ensure_submitted(job_id, job, audio_path)
                 payload = self._await_result(transcribe_id)
@@ -55,7 +65,11 @@ class Worker:
                 update_job(self._conn, job_id, stage="fetched")
 
             self._write_markdown(job_id, payload, speaker_map={})
+            self._cleanup(job_id)
             update_job(self._conn, job_id, stage="done", last_error=None)
+        except TimeoutError as exc:
+            # 결과가 아직 안 나왔을 뿐이다. transcribe_id를 보존하고 재확인할 수 있게 둔다.
+            update_job(self._conn, job_id, stage="stalled", last_error=str(exc))
         except Exception as exc:  # 개별 실패가 워커를 멈추지 않게 격리
             update_job(self._conn, job_id, stage="failed", last_error=str(exc))
 
@@ -137,6 +151,21 @@ class Worker:
             "전사 결과를 시간 내에 받지 못했습니다. 목록에서 '다시 확인'을 눌러주세요. "
             f"(결과는 제출 후 {RESULT_RETENTION_DAYS}일간만 보관됩니다)"
         )
+
+    def _is_expired(self, job) -> bool:
+        """RTZR은 결과를 3일만 보관한다. 그 이후엔 폴링해도 소용없다."""
+        if not job["submitted_at"]:
+            return False
+        submitted = datetime.fromisoformat(job["submitted_at"])
+        return datetime.now(timezone.utc) - submitted > timedelta(days=RESULT_RETENTION_DAYS)
+
+    def _cleanup(self, job_id: str) -> None:
+        """추출 오디오와 yt-dlp가 받은 원본을 지운다.
+
+        사용자의 로컬 원본 파일과 raw/{id}.json은 건드리지 않는다.
+        """
+        for path in self._media_dir.glob(f"{job_id}.*"):
+            path.unlink(missing_ok=True)
 
     def _write_markdown(self, job_id: str, payload: dict, *, speaker_map: dict) -> Path:
         job = get_job(self._conn, job_id)

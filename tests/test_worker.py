@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -266,3 +267,57 @@ def test_regenerate_does_not_invoke_collision_logic(workspace, monkeypatch):
 
     assert calls == []  # 기존 경로를 재사용했으니 접미사 로직은 아예 호출되지 않아야 한다
     assert get_job(conn, job_id)["md_path"] == original_path
+
+
+def test_timeout_marks_job_stalled_not_failed(workspace):
+    """과금된 결과를 버리지 않기 위해 failed가 아니라 stalled여야 한다."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
+
+    class NeverFinishesAsr(FakeAsr):
+        def poll(self, transcribe_id):
+            return {"id": transcribe_id, "status": "transcribing"}
+
+    worker = make_worker(conn, root, asr=NeverFinishesAsr())
+    monkeypatched_attempts = 2
+    import app.worker as worker_module
+    worker_module.MAX_POLL_ATTEMPTS = monkeypatched_attempts
+
+    worker.process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "stalled"
+    assert job["rtzr_transcribe_id"] == "transcribe-1"  # id는 보존되어야 한다
+
+    worker_module.MAX_POLL_ATTEMPTS = 240  # 다른 테스트에 영향 없도록 원복
+
+
+def test_expired_job_is_marked_failed_with_resubmit_notice(workspace):
+    conn, root = workspace
+    job_id = create_job(conn, title="t", source="s", source_type="file")
+    four_days_ago = (datetime.now(timezone.utc) - timedelta(days=4)).isoformat()
+    update_job(
+        conn, job_id, stage="stalled",
+        rtzr_transcribe_id="transcribe-1", submitted_at=four_days_ago,
+    )
+
+    make_worker(conn, root).process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "failed"
+    assert "재제출" in job["last_error"]
+
+
+def test_media_files_are_cleaned_up_after_success(workspace):
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
+
+    make_worker(conn, root).process(job_id)
+
+    assert not (root / "media" / f"{job_id}.m4a").exists()
+    assert source.exists(), "사용자의 원본 파일은 지우지 않는다"
+    assert (root / "raw" / f"{job_id}.json").exists(), "raw JSON은 영구 보관한다"
