@@ -1,0 +1,8 @@
+.env
+transcripts/
+raw/
+media/
+inbox/
+*.db
+__pycache__/
+.venv/
