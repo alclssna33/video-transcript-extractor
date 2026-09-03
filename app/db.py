@@ -43,6 +43,12 @@ def now_iso() -> str:
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
+    """
+    Establish a database connection.
+
+    check_same_thread=False: Task 7의 워커가 asyncio.to_thread()로
+    블로킹 DB 호출을 다른 스레드에서 실행하기 때문에 필요하다.
+    """
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn

@@ -1,6 +1,6 @@
 import json
 
-from app.db import connect, create_job, get_job, init_db, list_jobs, update_job
+from app.db import connect, create_job, get_job, init_db, list_jobs, list_jobs_by_stage, update_job
 
 
 def test_create_and_get_job(tmp_path):
@@ -68,3 +68,27 @@ def test_init_db_is_idempotent(tmp_path):
     init_db(conn)
     init_db(conn)
     assert list_jobs(conn) == []
+
+
+def test_list_jobs_by_stage_filters_and_orders(tmp_path):
+    conn = connect(tmp_path / "jobs.db")
+    init_db(conn)
+    j1 = create_job(conn, title="first", source="s", source_type="url")
+    j2 = create_job(conn, title="second", source="s", source_type="url")
+
+    update_job(conn, j1, stage="done")
+    update_job(conn, j2, stage="submitted")
+
+    result = list_jobs_by_stage(conn, ("submitted", "done"))
+    assert len(result) == 2
+
+    result = list_jobs_by_stage(conn, ("pending",))
+    assert result == []
+
+
+def test_create_job_with_none_keywords_defaults_to_empty_list(tmp_path):
+    conn = connect(tmp_path / "jobs.db")
+    init_db(conn)
+    job_id = create_job(conn, title="t", source="s", source_type="url", keywords=None)
+    job = get_job(conn, job_id)
+    assert json.loads(job["keywords"]) == []
