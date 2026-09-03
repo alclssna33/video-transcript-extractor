@@ -72,3 +72,67 @@ class RtzrClient:
             else time.time() + 6 * 3600 - TOKEN_REFRESH_MARGIN_SEC
         )
         return self._token
+
+    def submit(
+        self,
+        audio_path: Path,
+        *,
+        keywords: list[str] | None = None,
+        spk_count: int | None = None,
+    ) -> str:
+        """전사를 요청하고 transcribe_id를 반환한다."""
+        config: dict[str, object] = {
+            "model_name": DEFAULT_MODEL,
+            "language": "ko",
+            "domain": "GENERAL",
+            "use_diarization": True,
+            "use_itn": True,
+            "use_disfluency_filter": True,
+            "use_paragraph_splitter": True,
+        }
+        if spk_count:
+            config["diarization"] = {"spk_count": spk_count}
+        if keywords:
+            config["keywords"] = keywords
+
+        with audio_path.open("rb") as audio_file:
+            response = self._request(
+                "POST",
+                "/v1/transcribe",
+                files={"file": (audio_path.name, audio_file, "application/octet-stream")},
+                data={"config": json.dumps(config, ensure_ascii=False)},
+            )
+        return response.json()["id"]
+
+    def poll(self, transcribe_id: str) -> dict:
+        """전사 상태를 조회한다. 완료 전이면 status='transcribing'."""
+        payload = self._request("GET", f"/v1/transcribe/{transcribe_id}").json()
+        if payload.get("status") == "failed":
+            message = payload.get("message") or json.dumps(payload, ensure_ascii=False)
+            raise AsrPermanentError(f"전사 실패: {message}")
+        return payload
+
+    def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
+        """토큰을 붙여 호출하고, 401이면 재발급 후 한 번만 재시도한다."""
+        for attempt in (1, 2):
+            headers = {"Authorization": f"Bearer {self.token(force=attempt == 2)}"}
+            try:
+                response = self._http.request(
+                    method, f"{BASE_URL}{path}", headers=headers, **kwargs
+                )
+            except httpx.RequestError as exc:
+                raise AsrTemporaryError(f"네트워크 오류: {exc}") from exc
+
+            if response.status_code in (401, 403) and attempt == 1:
+                continue  # 토큰 만료로 보고 재발급 후 재시도
+            if response.status_code in (401, 403):
+                raise AsrAuthError("인증에 실패했습니다. RTZR 자격 증명을 확인하세요.")
+            if response.status_code == 429:
+                raise AsrTemporaryError("요청이 너무 잦습니다(429). 폴링 간격을 늘리세요.")
+            if response.status_code >= 500:
+                raise AsrTemporaryError(f"RTZR 서버 오류 {response.status_code}")
+            if response.status_code >= 400:
+                raise AsrPermanentError(f"요청 거부 {response.status_code}: {response.text}")
+            return response
+
+        raise AsrAuthError("인증 재시도에 실패했습니다.")
