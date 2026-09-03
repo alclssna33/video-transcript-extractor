@@ -163,9 +163,14 @@ class Worker:
         """추출 오디오와 yt-dlp가 받은 원본을 지운다.
 
         사용자의 로컬 원본 파일과 raw/{id}.json은 건드리지 않는다.
+        정리 실패(파일 잠금 등)가 이미 완료된 job을 failed로 만들면 안 되므로
+        예외를 삼킨다.
         """
         for path in self._media_dir.glob(f"{job_id}.*"):
-            path.unlink(missing_ok=True)
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def _write_markdown(self, job_id: str, payload: dict, *, speaker_map: dict) -> Path:
         job = get_job(self._conn, job_id)

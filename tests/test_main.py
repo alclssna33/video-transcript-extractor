@@ -162,6 +162,43 @@ def test_rename_speakers_rejects_job_without_transcript(client):
     assert response.status_code == 400
 
 
+def test_retry_reschedules_stalled_job(client, tmp_path):
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+    created = client.post(
+        "/jobs", data={"source": str(video), "title": "t"}, follow_redirects=False
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    wait_for_done(client, job_id)
+
+    # 강제로 stalled 상태로 되돌려서 재확인 버튼을 검증한다
+    conn = client.app.state.conn
+    from app.db import update_job
+    update_job(conn, job_id, stage="stalled", last_error="시간 초과")
+
+    response = client.post(f"/jobs/{job_id}/retry", follow_redirects=False)
+
+    assert response.status_code == 303
+    # job이 이미 stalled 상태에서 시작하므로 wait_for_done을 그대로 쓰면
+    # 백그라운드 작업이 실제로 시작되기 전에 (여전히 stalled인) 첫 폴링에서
+    # "끝났다"고 오판할 수 있다. 여기서는 done 도달만 명시적으로 기다린다.
+    for _ in range(100):
+        response = client.get(f"/jobs/{job_id}/status")
+        stage = response.json().get("stage") if response.status_code == 200 else None
+        if stage == "done":
+            break
+        time.sleep(0.05)
+    else:
+        raise AssertionError(f"재시도 후 작업이 완료되지 않았습니다: {job_id}")
+
+    assert stage == "done"
+
+
+def test_retry_rejects_unknown_job(client):
+    response = client.post("/jobs/nonexistent-id/retry")
+    assert response.status_code == 404
+
+
 def test_inbox_files_are_picked_up(tmp_path, monkeypatch):
     monkeypatch.setenv("RTZR_CLIENT_ID", "cid")
     monkeypatch.setenv("RTZR_CLIENT_SECRET", "secret")

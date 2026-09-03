@@ -321,3 +321,40 @@ def test_media_files_are_cleaned_up_after_success(workspace):
     assert not (root / "media" / f"{job_id}.m4a").exists()
     assert source.exists(), "사용자의 원본 파일은 지우지 않는다"
     assert (root / "raw" / f"{job_id}.json").exists(), "raw JSON은 영구 보관한다"
+
+
+def test_stalled_job_completes_on_retry_without_resubmitting(workspace):
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
+
+    class TimesOutOnceAsr(FakeAsr):
+        def __init__(self):
+            super().__init__()
+            self.poll_calls = 0
+
+        def poll(self, transcribe_id):
+            self.poll_calls += 1
+            if self.poll_calls == 1:
+                return {"id": transcribe_id, "status": "transcribing"}
+            return self.payload
+
+    asr = TimesOutOnceAsr()
+    worker = make_worker(conn, root, asr=asr)
+
+    import app.worker as worker_module
+    original_max_attempts = worker_module.MAX_POLL_ATTEMPTS
+    worker_module.MAX_POLL_ATTEMPTS = 1  # 첫 폴링에서 바로 타임아웃되도록
+    worker.process(job_id)
+    worker_module.MAX_POLL_ATTEMPTS = original_max_attempts
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "stalled"
+    submitted_count_before_retry = len(asr.submitted)
+
+    worker.process(job_id)  # "다시 확인" 시뮬레이션
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "done"
+    assert len(asr.submitted) == submitted_count_before_retry  # 재제출 없었음
