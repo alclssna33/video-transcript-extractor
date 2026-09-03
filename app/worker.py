@@ -39,15 +39,20 @@ class Worker:
             if job is None:
                 return
 
-            audio_path = self._ensure_audio(job)
-            transcribe_id = self._ensure_submitted(job_id, job, audio_path)
-            payload = self._await_result(transcribe_id)
-
             raw_path = self._raw_dir / f"{job_id}.json"
-            raw_path.write_text(
-                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            update_job(self._conn, job_id, stage="fetched")
+            if job["stage"] == "fetched" and raw_path.exists():
+                # raw JSON은 이미 저장되어 있다 — RTZR을 다시 폴링하지 않는다.
+                # (3일 지나 결과가 만료된 뒤에도 로컬 결과로 markdown을 만들 수 있어야 한다)
+                payload = json.loads(raw_path.read_text(encoding="utf-8"))
+            else:
+                audio_path = self._ensure_audio(job)
+                transcribe_id = self._ensure_submitted(job_id, job, audio_path)
+                payload = self._await_result(transcribe_id)
+
+                raw_path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+                update_job(self._conn, job_id, stage="fetched")
 
             self._write_markdown(job_id, payload, speaker_map={})
             update_job(self._conn, job_id, stage="done", last_error=None)
@@ -66,8 +71,8 @@ class Worker:
         return self._write_markdown(job_id, payload, speaker_map=speaker_map)
 
     def recover(self) -> None:
-        """재시작 복구: 제출 전 단계는 되돌리고, 제출된 job은 폴링을 위해 남긴다."""
-        for job in list_jobs_by_stage(self._conn, ("extracted", "fetched")):
+        """재시작 복구: 오디오 추출만 된 job은 되돌리고, 제출/완료된 job은 그대로 재개 가능하다."""
+        for job in list_jobs_by_stage(self._conn, ("extracted",)):
             update_job(self._conn, job["id"], stage="pending")
 
     def pending_job_ids(self) -> list[str]:
@@ -142,7 +147,27 @@ class Worker:
         }
         markdown = render_markdown(meta=meta, raw=payload, speaker_map=speaker_map)
 
-        md_path = self._transcripts_dir / transcript_filename(job["created_at"], job["title"])
+        existing_md_path = job["md_path"]
+        if existing_md_path:
+            # 이미 이 job에 대해 파일이 만들어진 적 있으면(재생성) 같은 경로에 덮어쓴다.
+            md_path = Path(existing_md_path)
+        else:
+            md_path = self._unique_transcript_path(job["created_at"], job["title"])
         md_path.write_text(markdown, encoding="utf-8")
         update_job(self._conn, job_id, md_path=str(md_path))
         return md_path
+
+    def _unique_transcript_path(self, date_iso: str, title: str) -> Path:
+        """같은 날짜+제목 파일이 이미 있으면 -2, -3 접미사를 붙인다."""
+        base_name = transcript_filename(date_iso, title)
+        candidate = self._transcripts_dir / base_name
+        if not candidate.exists():
+            return candidate
+
+        stem = candidate.stem
+        suffix = 2
+        while True:
+            candidate = self._transcripts_dir / f"{stem}-{suffix}{candidate.suffix}"
+            if not candidate.exists():
+                return candidate
+            suffix += 1
