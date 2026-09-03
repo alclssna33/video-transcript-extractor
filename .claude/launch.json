@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "transcript-app",
+      "runtimeExecutable": ".venv/Scripts/python",
+      "runtimeArgs": ["-m", "uvicorn", "app.main:create_app", "--factory", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}
