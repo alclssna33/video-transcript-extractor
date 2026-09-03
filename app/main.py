@@ -38,9 +38,24 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
     app.state.semaphore = asyncio.Semaphore(1)
     app.state.background_tasks: set[asyncio.Task] = set()
 
+    VIDEO_SUFFIXES = {".mp4", ".m4a", ".mp3", ".mkv", ".mov", ".avi", ".wav", ".flac"}
+
     @app.on_event("startup")
-    async def recover_incomplete_jobs() -> None:
+    async def recover_and_scan() -> None:
         worker.recover()
+
+        # inbox 폴더에 있는 파일 중 아직 등록되지 않은 것을 job으로 만든다.
+        known_sources = {job["source"] for job in list_jobs(conn)}
+        for path in sorted(config.inbox_dir.iterdir()):
+            if path.is_file() and path.suffix.lower() in VIDEO_SUFFIXES:
+                if str(path) not in known_sources:
+                    create_job(
+                        conn,
+                        title=path.stem,
+                        source=str(path),
+                        source_type="file",
+                    )
+
         for job_id in [*worker.resumable_job_ids(), *worker.fetched_job_ids(), *worker.pending_job_ids()]:
             _schedule(app, job_id)
 

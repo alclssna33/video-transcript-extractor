@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db import create_job, get_job
+from app.db import create_job, get_job, list_jobs
 from app.main import create_app
 
 FIXTURE = json.loads(
@@ -154,3 +154,23 @@ def test_rename_speakers_rejects_job_without_transcript(client):
     response = client.post(f"/jobs/{job_id}/speakers", data={"speaker_0": "x"})
 
     assert response.status_code == 400
+
+
+def test_inbox_files_are_picked_up(tmp_path, monkeypatch):
+    monkeypatch.setenv("RTZR_CLIENT_ID", "cid")
+    monkeypatch.setenv("RTZR_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(
+        "app.worker.extract_audio", lambda source, dest: (Path(dest).write_bytes(b"a"), Path(dest))[1]
+    )
+    monkeypatch.setattr("app.worker.probe_duration", lambda path: 60.0)
+
+    inbox = tmp_path / "data" / "inbox"
+    inbox.mkdir(parents=True)
+    (inbox / "강의녹화.mp4").write_bytes(b"video")
+
+    app = create_app(asr=FakeAsr(), poll_interval=0)
+    with TestClient(app) as client:
+        titles = [job["title"] for job in list_jobs(client.app.state.conn)]
+
+    assert "강의녹화" in titles
