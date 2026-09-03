@@ -49,10 +49,11 @@ def load_config(env_path: Path | None = None) -> Config:
             "발급받은 값을 채우세요."
         )
 
+    data_dir_str = os.getenv("DATA_DIR", "data").strip() or "data"
     config = Config(
         client_id=client_id,
         client_secret=client_secret,
-        data_dir=Path(os.getenv("DATA_DIR", "data")),
+        data_dir=Path(data_dir_str),
     )
     for directory in (
         config.transcripts_dir,

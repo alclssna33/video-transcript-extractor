@@ -1,4 +1,5 @@
 import pytest
+from pathlib import Path
 from app.config import load_config, ConfigError
 
 
@@ -24,3 +25,17 @@ def test_loads_credentials_and_creates_dirs(tmp_path, monkeypatch):
     assert cfg.media_dir.is_dir()
     assert cfg.inbox_dir.is_dir()
     assert cfg.db_path.parent.is_dir()
+
+
+def test_whitespace_data_dir_falls_back_to_default(tmp_path, monkeypatch):
+    monkeypatch.setenv("RTZR_CLIENT_ID", "cid")
+    monkeypatch.setenv("RTZR_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("DATA_DIR", "   ")  # whitespace string
+
+    cfg = load_config(env_path=tmp_path / "nonexistent.env")
+
+    assert cfg.data_dir == Path("data")
+    assert cfg.transcripts_dir.is_dir()
+    assert cfg.raw_dir.is_dir()
+    assert cfg.media_dir.is_dir()
+    assert cfg.inbox_dir.is_dir()
