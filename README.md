@@ -5,6 +5,7 @@
 
 ## 준비
 
+0. **Python 3.10 이상** (코드 전반에서 `X | None` 타입 문법을 사용함)
 1. **ffmpeg 설치** (ffprobe 포함) 후 PATH에 추가 — `ffmpeg -version`으로 확인
 2. **RTZR 자격 증명 발급**: https://developers.rtzr.ai/signup 가입 후
    https://developers.rtzr.ai/console/ 에서 client_id / client_secret 발급 (10시간 무료)
