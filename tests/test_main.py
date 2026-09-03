@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db import get_job
+from app.db import create_job, get_job
 from app.main import create_app
 
 FIXTURE = json.loads(
@@ -145,3 +145,12 @@ def test_rename_speakers_regenerates_markdown(client, tmp_path):
     )
     assert "**[김팀장]" in markdown
     assert "화자 1" not in markdown
+
+
+def test_rename_speakers_rejects_job_without_transcript(client):
+    conn = client.app.state.conn
+    job_id = create_job(conn, title="t", source="s", source_type="file")
+
+    response = client.post(f"/jobs/{job_id}/speakers", data={"speaker_0": "x"})
+
+    assert response.status_code == 400

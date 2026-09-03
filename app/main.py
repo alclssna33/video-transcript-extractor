@@ -1,5 +1,6 @@
 """FastAPI 앱. 라우트는 얇게 유지하고 처리 로직은 worker에 둔다."""
 import asyncio
+import html
 import json
 from pathlib import Path
 
@@ -35,12 +36,13 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
     app.state.worker = worker
     # 1인용 로컬 앱이므로 동시 처리는 1건으로 제한한다.
     app.state.semaphore = asyncio.Semaphore(1)
+    app.state.background_tasks: set[asyncio.Task] = set()
 
     @app.on_event("startup")
     async def recover_incomplete_jobs() -> None:
         worker.recover()
         for job_id in [*worker.resumable_job_ids(), *worker.fetched_job_ids(), *worker.pending_job_ids()]:
-            asyncio.create_task(_run(app, job_id))
+            _schedule(app, job_id)
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
@@ -63,7 +65,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
         is_url = source.startswith(("http://", "https://"))
         if not is_url and not Path(source).exists():
             return HTMLResponse(
-                f"<p>파일을 찾을 수 없습니다: {source}</p><p><a href='/'>돌아가기</a></p>",
+                f"<p>파일을 찾을 수 없습니다: {html.escape(source)}</p><p><a href='/'>돌아가기</a></p>",
                 status_code=400,
             )
 
@@ -75,7 +77,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
             keywords=[k.strip() for k in keywords.split(",") if k.strip()],
             spk_count=int(spk_count) if spk_count.strip().isdigit() else None,
         )
-        asyncio.create_task(_run(app, job_id))
+        _schedule(app, job_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
     @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -113,6 +115,12 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
 
     @app.post("/jobs/{job_id}/speakers")
     async def rename_speakers(request: Request, job_id: str):
+        job = get_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+        if job["stage"] not in ("fetched", "done"):
+            raise HTTPException(status_code=400, detail="아직 전사 결과가 없어 화자 이름을 저장할 수 없습니다.")
+
         form = await request.form()
         speaker_map = {
             key.removeprefix("speaker_"): str(value).strip()
@@ -123,6 +131,13 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
     return app
+
+
+def _schedule(app: FastAPI, job_id: str) -> None:
+    """백그라운드 태스크를 만들고 GC되지 않도록 강한 참조를 보관한다."""
+    task = asyncio.create_task(_run(app, job_id))
+    app.state.background_tasks.add(task)
+    task.add_done_callback(app.state.background_tasks.discard)
 
 
 async def _run(app: FastAPI, job_id: str) -> None:
