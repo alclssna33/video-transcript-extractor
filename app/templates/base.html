@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}영상 대본 추출기{% endblock %}</title>
+  <style>
+    body { font-family: system-ui, "Malgun Gothic", sans-serif; max-width: 860px;
+           margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #1a1a1a; }
+    a { color: #0b62d0; }
+    form { display: grid; gap: .75rem; margin-bottom: 2rem; }
+    label { font-weight: 600; font-size: .9rem; }
+    input, button { padding: .5rem; font-size: 1rem; font-family: inherit; }
+    button { cursor: pointer; background: #0b62d0; color: #fff; border: 0; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { text-align: left; padding: .5rem; border-bottom: 1px solid #e5e5e5; }
+    .badge { padding: .1rem .5rem; border-radius: 999px; font-size: .8rem; }
+    .stage-done { background: #dcf5e3; }
+    .stage-failed, .stage-stalled { background: #ffe0e0; }
+    .stage-pending, .stage-extracted, .stage-submitted, .stage-fetched { background: #fff3cd; }
+    .hint { color: #666; font-size: .85rem; }
+    .warn { background: #fff8e1; padding: .75rem; border-left: 3px solid #f0b400; }
+    .utterance { margin: .4rem 0; }
+    .speaker { font-weight: 700; }
+    .time { color: #888; font-size: .85rem; margin-left: .3rem; }
+  </style>
+</head>
+<body>
+  <h1><a href="/" style="text-decoration:none;color:inherit">영상 대본 추출기</a></h1>
+  {% block content %}{% endblock %}
+</body>
+</html>

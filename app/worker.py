@@ -81,6 +81,9 @@ class Worker:
     def resumable_job_ids(self) -> list[str]:
         return [job["id"] for job in list_jobs_by_stage(self._conn, ("submitted",))]
 
+    def fetched_job_ids(self) -> list[str]:
+        return [job["id"] for job in list_jobs_by_stage(self._conn, ("fetched",))]
+
     def _ensure_audio(self, job: sqlite3.Row) -> Path:
         if job["audio_path"] and Path(job["audio_path"]).exists():
             return Path(job["audio_path"])

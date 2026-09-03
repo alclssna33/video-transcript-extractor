@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<form method="post" action="/jobs">
+  <div>
+    <label for="source">영상 파일 경로 또는 URL</label><br>
+    <input id="source" name="source" style="width:100%"
+           placeholder="D:\videos\회의.mp4 또는 https://..." required>
+    <div class="hint">로컬 파일은 경로를 그대로 입력하세요. 업로드하지 않으므로 크기 제한이 없습니다.</div>
+  </div>
+  <div>
+    <label for="title">제목</label><br>
+    <input id="title" name="title" style="width:100%" placeholder="주간회의" required>
+  </div>
+  <div>
+    <label for="keywords">고유명사 힌트 (선택, 쉼표로 구분)</label><br>
+    <input id="keywords" name="keywords" style="width:100%" placeholder="회사명, 사람 이름, 전문용어">
+    <div class="hint">회의에 나오는 이름과 용어를 넣으면 오인식이 줄어듭니다.</div>
+  </div>
+  <div>
+    <label for="spk_count">화자 수 (선택)</label><br>
+    <input id="spk_count" name="spk_count" type="number" min="1" max="20">
+    <div class="hint">확실히 아는 경우에만 입력하세요. 잘못 넣으면 정확도가 떨어집니다.</div>
+  </div>
+  <button type="submit">전사 시작</button>
+</form>
+
+<h2>작업 목록</h2>
+{% if jobs %}
+<table>
+  <tr><th>제목</th><th>상태</th><th>생성</th></tr>
+  {% for job in jobs %}
+  <tr>
+    <td><a href="/jobs/{{ job['id'] }}">{{ job['title'] }}</a></td>
+    <td><span class="badge stage-{{ job['stage'] }}">{{ job['stage'] }}</span></td>
+    <td class="hint">{{ job['created_at'][:16].replace('T', ' ') }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% else %}
+<p class="hint">아직 작업이 없습니다.</p>
+{% endif %}
+
+<script>
+  // 처리 중인 작업이 있으면 3초마다 새로고침한다.
+  if (document.querySelector('.stage-pending, .stage-extracted, .stage-submitted, .stage-fetched')) {
+    setTimeout(() => location.reload(), 3000);
+  }
+</script>
+{% endblock %}
