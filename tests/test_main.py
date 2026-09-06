@@ -57,11 +57,20 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
 
     def fake_extract(source, dest):
+        # 원본이 없으면 실패한다 — 실제 ffmpeg처럼 동작해야 "재추출이 일어났는지"를
+        # 원본을 지워두는 것만으로 테스트할 수 있다.
+        if not Path(source).exists():
+            raise FileNotFoundError(f"원본이 없습니다: {source}")
         Path(dest).write_bytes(b"audio")
         return Path(dest)
 
+    def fake_probe_duration(path):
+        if not Path(path).exists():
+            raise FileNotFoundError(f"원본이 없습니다: {path}")
+        return 3792.0
+
     monkeypatch.setattr("app.worker.extract_audio", fake_extract)
-    monkeypatch.setattr("app.worker.probe_duration", lambda path: 3792.0)
+    monkeypatch.setattr("app.worker.probe_duration", fake_probe_duration)
 
     app = create_app(asr=FakeAsr(), poll_interval=0)
     with TestClient(app) as test_client:
