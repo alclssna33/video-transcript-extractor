@@ -1,56 +1,99 @@
 {% extends "base.html" %}
 {% block content %}
 <p><a href="/">← 목록</a></p>
+
 <h2>{{ job['title'] }}</h2>
-<p class="hint">
-  {{ job['source'] }} · <span class="badge stage-{{ job['stage'] }}">{{ job['stage'] }}</span>
-  {% if job['md_path'] %}<br>저장 위치: <code>{{ job['md_path'] }}</code>{% endif %}
-</p>
+
+<ul class="meta-list">
+  <li><span class="mono">{{ job['source'] }}</span></li>
+  <li>
+    상태:
+    <span class="badge
+      {%- if job['stage'] in ('done', 'audio_ready') %} badge--ok
+      {%- elif job['stage'] in ('failed', 'stalled') %} badge--danger
+      {%- else %} badge--warn{% endif %}">{{ job['stage'] }}</span>
+  </li>
+  {% if job['md_path'] %}
+  <li>전사본: <span class="mono">{{ job['md_path'] }}</span></li>
+  {% endif %}
+</ul>
 
 {% if job['last_error'] %}
-<pre class="warn">{{ job['last_error'] }}</pre>
+<pre class="banner banner--danger">{{ job['last_error'] }}</pre>
+{% endif %}
+
+<div class="btn-row">
+  {% if job['audio_path'] %}
+  <a class="btn" href="/jobs/{{ job['id'] }}/audio">오디오 다운로드 (.m4a)</a>
+  {% endif %}
+
+  {% if job['stage'] == 'audio_ready' %}
+  <form method="post" action="/jobs/{{ job['id'] }}/transcribe">
+    <button class="btn btn--primary" type="submit">이어서 스크립트 추출</button>
+  </form>
+  {% endif %}
+
+  {% if job['stage'] in ('stalled', 'failed') %}
+  <form method="post" action="/jobs/{{ job['id'] }}/retry">
+    <button class="btn" type="submit">다시 확인</button>
+  </form>
+  {% endif %}
+
+  {% if job['audio_path'] %}
+  <form method="post" action="/jobs/{{ job['id'] }}/audio/delete">
+    <button class="btn" type="submit">오디오 삭제</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if job['stage'] == 'audio_ready' %}
+<div class="banner">
+  오디오 추출이 끝났습니다. 파일을 내려받아 클로바노트 같은 외부 도구에 올리거나,
+  위 버튼으로 RTZR 전사를 이어서 진행할 수 있습니다.
+</div>
 {% endif %}
 
 {% if job['stage'] in ('stalled', 'failed') %}
-<form method="post" action="/jobs/{{ job['id'] }}/retry">
-  <button type="submit">다시 확인</button>
-  <span class="hint">
-    전사 결과는 제출 후 3일간만 보관됩니다. 그 이후에는 재제출(재과금)이 필요합니다.
-  </span>
-</form>
+<p class="hint">전사 결과는 제출 후 3일간만 보관됩니다. 그 이후에는 재제출(재과금)이 필요합니다.</p>
 {% endif %}
 
 {% if utterances %}
-<div class="warn">
+<div class="banner banner--warn">
   자동 생성된 전사본입니다. 인식 오류가 포함될 수 있습니다.
   이 <code>.md</code> 파일을 NotebookLM에 소스로 올려 사용하세요.
 </div>
 
 <h3>화자 이름</h3>
 <form method="post" action="/jobs/{{ job['id'] }}/speakers">
-  {% for spk in speaker_ids %}
-  <div>
-    <label for="speaker_{{ spk }}">화자 {{ spk + 1 }}</label>
-    <input id="speaker_{{ spk }}" name="speaker_{{ spk }}"
-           value="{{ speaker_map.get(spk|string, '') }}" placeholder="예: 김팀장">
+  <div class="card">
+    {% for spk in speaker_ids %}
+    <div class="field">
+      <label for="speaker_{{ spk }}">화자 {{ spk + 1 }}</label>
+      <input id="speaker_{{ spk }}" name="speaker_{{ spk }}" type="text"
+             value="{{ speaker_map.get(spk|string, '') }}" placeholder="예: 김팀장">
+    </div>
+    {% endfor %}
+    <p class="hint">
+      저장하면 원본 JSON에서 .md를 다시 만듭니다.
+      <strong>.md를 직접 편집했다면 그 내용은 덮어써집니다.</strong>
+    </p>
+    <div style="margin-top: var(--space-4)">
+      <button class="btn btn--primary" type="submit">이름 저장하고 다시 생성</button>
+    </div>
   </div>
-  {% endfor %}
-  <div class="hint">
-    저장하면 원본 JSON에서 .md를 다시 만듭니다.
-    <strong>.md를 직접 편집했다면 그 내용은 덮어써집니다.</strong>
-  </div>
-  <button type="submit">이름 저장하고 다시 생성</button>
 </form>
 
 <h3>전사 내용</h3>
 {% for item in utterances %}
-<p class="utterance">
-  <span class="speaker">[{{ speaker_map.get(item['spk']|string) or '화자 ' ~ (item['spk'] + 1) }}]</span>
-  <span class="time">{{ item['timestamp'] }}</span><br>
+<div class="utterance" data-spk="{{ item['spk'] }}">
+  <div class="utterance__meta">
+    <span class="utterance__speaker">{{ speaker_map.get(item['spk']|string) or '화자 ' ~ (item['spk'] + 1) }}</span>
+    <span class="utterance__time">{{ item['timestamp'] }}</span>
+  </div>
   {{ item['msg'] }}
-</p>
+</div>
 {% endfor %}
-{% else %}
-<p class="hint">아직 전사 결과가 없습니다.</p>
+{% elif job['stage'] != 'audio_ready' %}
+<div class="empty">아직 전사 결과가 없습니다.</div>
 {% endif %}
 {% endblock %}

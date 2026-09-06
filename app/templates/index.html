@@ -1,55 +1,136 @@
 {% extends "base.html" %}
 {% block content %}
+
 {% if not has_credentials %}
-<div class="warn">
+<div class="banner banner--warn">
   RTZR 자격 증명이 설정되지 않았습니다. <a href="/settings">설정</a>에서 입력하면
   스크립트 추출을 쓸 수 있습니다. (오디오 추출만 할 거라면 없어도 됩니다.)
 </div>
 {% endif %}
-<form method="post" action="/jobs">
-  <div>
-    <label for="source">영상 파일 경로 또는 URL</label><br>
-    <input id="source" name="source" style="width:100%"
-           placeholder="D:\videos\회의.mp4 또는 https://..." required>
-    <div class="hint">로컬 파일은 경로를 그대로 입력하세요. 업로드하지 않으므로 크기 제한이 없습니다.</div>
+
+<form method="post" action="/jobs" id="submit-form">
+  <div class="card">
+    <div class="field">
+      <label for="source">영상 파일 경로 또는 URL</label>
+      <input id="source" name="source" type="text"
+             placeholder="D:\videos\회의.mp4 또는 https://..." required>
+      <p class="hint">로컬 파일은 경로를 그대로 입력하세요. 업로드하지 않으므로 크기 제한이 없습니다.</p>
+    </div>
+
+    <div class="field">
+      <label for="title">제목</label>
+      <input id="title" name="title" type="text" placeholder="주간회의" required>
+    </div>
+
+    <div class="field">
+      <label>처리 범위</label>
+      <div class="choice-group">
+        <label class="choice">
+          <input type="radio" name="mode" value="full" checked>
+          <span>
+            <span class="choice__label">스크립트까지</span>
+            <span class="choice__desc">오디오를 뽑은 뒤 RTZR로 전사해 화자 구분된 .md를 만듭니다.</span>
+          </span>
+        </label>
+        <label class="choice">
+          <input type="radio" name="mode" value="audio_only">
+          <span>
+            <span class="choice__label">오디오만 추출</span>
+            <span class="choice__desc">전사하지 않고 .m4a만 만듭니다. 클로바노트 등 외부 도구에 올릴 때 쓰세요.</span>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="keywords">고유명사 힌트 (선택, 쉼표로 구분)</label>
+      <input id="keywords" name="keywords" type="text" placeholder="회사명, 사람 이름, 전문용어">
+      <p class="hint">회의에 나오는 이름과 용어를 넣으면 오인식이 줄어듭니다.</p>
+    </div>
+
+    <div class="field">
+      <label for="spk_count">화자 수 (선택)</label>
+      <input id="spk_count" name="spk_count" type="number" min="1" max="20">
+      <p class="hint">확실히 아는 경우에만 입력하세요. 잘못 넣으면 정확도가 떨어집니다.</p>
+    </div>
+
+    <div style="margin-top: var(--space-5)">
+      <button class="btn btn--primary" type="submit" id="submit-btn">시작</button>
+    </div>
   </div>
-  <div>
-    <label for="title">제목</label><br>
-    <input id="title" name="title" style="width:100%" placeholder="주간회의" required>
-  </div>
-  <div>
-    <label for="keywords">고유명사 힌트 (선택, 쉼표로 구분)</label><br>
-    <input id="keywords" name="keywords" style="width:100%" placeholder="회사명, 사람 이름, 전문용어">
-    <div class="hint">회의에 나오는 이름과 용어를 넣으면 오인식이 줄어듭니다.</div>
-  </div>
-  <div>
-    <label for="spk_count">화자 수 (선택)</label><br>
-    <input id="spk_count" name="spk_count" type="number" min="1" max="20">
-    <div class="hint">확실히 아는 경우에만 입력하세요. 잘못 넣으면 정확도가 떨어집니다.</div>
-  </div>
-  <button type="submit">전사 시작</button>
 </form>
 
 <h2>작업 목록</h2>
 {% if jobs %}
 <table>
-  <tr><th>제목</th><th>상태</th><th>생성</th></tr>
-  {% for job in jobs %}
-  <tr>
-    <td><a href="/jobs/{{ job['id'] }}">{{ job['title'] }}</a></td>
-    <td><span class="badge stage-{{ job['stage'] }}">{{ job['stage'] }}</span></td>
-    <td class="hint">{{ job['created_at'][:16].replace('T', ' ') }}</td>
-  </tr>
-  {% endfor %}
+  <thead>
+    <tr><th>제목</th><th>상태</th><th>생성</th></tr>
+  </thead>
+  <tbody>
+    {% for job in jobs %}
+    <tr data-job-id="{{ job['id'] }}">
+      <td><a href="/jobs/{{ job['id'] }}">{{ job['title'] }}</a></td>
+      <td>
+        <span class="badge js-stage
+          {%- if job['stage'] in ('done', 'audio_ready') %} badge--ok
+          {%- elif job['stage'] in ('failed', 'stalled') %} badge--danger
+          {%- else %} badge--warn{% endif %}">{{ job['stage'] }}</span>
+      </td>
+      <td class="hint" style="margin:0">{{ job['created_at'][:16].replace('T', ' ') }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
 </table>
 {% else %}
-<p class="hint">아직 작업이 없습니다.</p>
+<div class="empty">
+  아직 작업이 없습니다.<br>
+  위에 영상 경로를 넣고 시작하거나, <code>data/inbox/</code> 폴더에 영상을 넣고 앱을 다시 실행하세요.
+</div>
 {% endif %}
 
 <script>
-  // 처리 중인 작업이 있으면 3초마다 새로고침한다.
-  if (document.querySelector('.stage-pending, .stage-extracted, .stage-submitted, .stage-fetched')) {
-    setTimeout(() => location.reload(), 3000);
+  // 제출 피드백: 버튼을 비활성화해 중복 제출과 "눌렸나?" 혼란을 막는다.
+  document.getElementById('submit-form')?.addEventListener('submit', () => {
+    const button = document.getElementById('submit-btn');
+    button.disabled = true;
+    button.textContent = '처리 중…';
+  });
+
+  // 진행 중인 작업만 폴링해 해당 뱃지만 갱신한다(전체 새로고침 대신).
+  const TERMINAL = ['done', 'failed', 'stalled', 'audio_ready'];
+
+  const badgeClass = (stage) =>
+    'badge js-stage ' + (
+      (stage === 'done' || stage === 'audio_ready') ? 'badge--ok'
+      : (stage === 'failed' || stage === 'stalled') ? 'badge--danger'
+      : 'badge--warn'
+    );
+
+  const active = [...document.querySelectorAll('tr[data-job-id]')].filter((row) => {
+    const stage = row.querySelector('.js-stage')?.textContent.trim();
+    return stage && !TERMINAL.includes(stage);
+  });
+
+  if (active.length) {
+    const poll = async () => {
+      let remaining = 0;
+      for (const row of active) {
+        const badge = row.querySelector('.js-stage');
+        if (TERMINAL.includes(badge.textContent.trim())) continue;
+        try {
+          const response = await fetch(`/jobs/${row.dataset.jobId}/status`);
+          if (!response.ok) { remaining += 1; continue; }
+          const stage = (await response.json()).stage;
+          badge.textContent = stage;
+          badge.className = badgeClass(stage);
+          if (!TERMINAL.includes(stage)) remaining += 1;
+        } catch (error) {
+          remaining += 1;
+        }
+      }
+      if (remaining) setTimeout(poll, 3000);
+    };
+    setTimeout(poll, 3000);
   }
 </script>
 {% endblock %}
