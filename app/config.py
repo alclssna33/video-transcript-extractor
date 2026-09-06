@@ -1,4 +1,7 @@
-"""설정 로딩. 자격 증명이 없으면 부팅 시점에 즉시 실패한다."""
+"""설정 로딩.
+
+자격 증명은 선택이다 — 없으면 설정 화면에서 입력할 수 있어야 하므로 부팅을 막지 않는다.
+"""
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,8 +15,8 @@ class ConfigError(Exception):
 
 @dataclass(frozen=True)
 class Config:
-    client_id: str
-    client_secret: str
+    client_id: str | None
+    client_secret: str | None
     data_dir: Path
 
     @property
@@ -40,14 +43,10 @@ class Config:
 def load_config(env_path: Path | None = None) -> Config:
     load_dotenv(env_path, override=False)
 
-    client_id = os.getenv("RTZR_CLIENT_ID", "").strip()
-    client_secret = os.getenv("RTZR_CLIENT_SECRET", "").strip()
-    if not client_id or not client_secret:
-        raise ConfigError(
-            "RTZR_CLIENT_ID / RTZR_CLIENT_SECRET가 필요합니다. "
-            ".env.example을 .env로 복사한 뒤 https://developers.rtzr.ai/console/ 에서 "
-            "발급받은 값을 채우세요."
-        )
+    # 자격 증명이 없어도 앱은 떠야 한다 — 설정 화면에서 입력할 수 있기 때문이다.
+    # 실제 사용 시점의 해석은 app/credentials.py가 담당한다(DB 설정이 우선).
+    client_id = os.getenv("RTZR_CLIENT_ID", "").strip() or None
+    client_secret = os.getenv("RTZR_CLIENT_SECRET", "").strip() or None
 
     data_dir_str = os.getenv("DATA_DIR", "data").strip() or "data"
     config = Config(

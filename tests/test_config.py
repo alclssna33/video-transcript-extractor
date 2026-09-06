@@ -1,14 +1,29 @@
-import pytest
 from pathlib import Path
-from app.config import load_config, ConfigError
+from app.config import load_config
 
 
-def test_missing_credentials_raises(tmp_path, monkeypatch):
+def test_missing_credentials_returns_none_instead_of_raising(tmp_path, monkeypatch):
+    """자격 증명은 설정 화면에서 입력할 수 있으므로 없어도 부팅되어야 한다."""
     monkeypatch.delenv("RTZR_CLIENT_ID", raising=False)
     monkeypatch.delenv("RTZR_CLIENT_SECRET", raising=False)
-    monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    with pytest.raises(ConfigError):
-        load_config(env_path=tmp_path / "nonexistent.env")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+
+    cfg = load_config(env_path=tmp_path / "nonexistent.env")
+
+    assert cfg.client_id is None
+    assert cfg.client_secret is None
+    assert cfg.transcripts_dir.is_dir()
+
+
+def test_blank_credentials_are_treated_as_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("RTZR_CLIENT_ID", "   ")
+    monkeypatch.setenv("RTZR_CLIENT_SECRET", "")
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+
+    cfg = load_config(env_path=tmp_path / "nonexistent.env")
+
+    assert cfg.client_id is None
+    assert cfg.client_secret is None
 
 
 def test_loads_credentials_and_creates_dirs(tmp_path, monkeypatch):
