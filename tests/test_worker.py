@@ -410,17 +410,28 @@ def test_audio_only_mode_stops_at_audio_ready_without_calling_asr(workspace):
     assert job["md_path"] is None
 
 
-def test_audio_only_job_completes_when_switched_to_full(workspace):
+def test_audio_only_job_completes_when_switched_to_full(workspace, monkeypatch):
     """이어서 스크립트 추출: 오디오 재추출 없이 전사까지 끝나야 한다."""
     conn, root = workspace
     source = root / "weekly.mp4"
     source.write_bytes(b"video")
+
+    extract_calls = []
+
+    def counting_extract(source_path, dest):
+        extract_calls.append(Path(dest))
+        Path(dest).write_bytes(b"audio")
+        return Path(dest)
+
+    monkeypatch.setattr("app.worker.extract_audio", counting_extract)
+
     job_id = create_job(
         conn, title="t", source=str(source), source_type="file", mode="audio_only"
     )
     worker = make_worker(conn, root)
     worker.process(job_id)
     assert get_job(conn, job_id)["stage"] == "audio_ready"
+    assert len(extract_calls) == 1
 
     original_audio_path = get_job(conn, job_id)["audio_path"]
 
@@ -429,8 +440,50 @@ def test_audio_only_job_completes_when_switched_to_full(workspace):
 
     job = get_job(conn, job_id)
     assert job["stage"] == "done"
-    assert job["audio_path"] == original_audio_path  # 같은 오디오를 재사용
+    assert job["audio_path"] == original_audio_path
     assert Path(job["md_path"]).exists()
+    assert len(extract_calls) == 1, "오디오가 재추출되었다 — 멱등 검사가 깨졌다"
+
+
+def test_already_submitted_job_is_not_orphaned_by_audio_only_mode(workspace):
+    """이미 제출(과금)된 job은 audio_only로 바뀌어도 결과를 버리면 안 된다."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
+    worker = make_worker(conn, root)
+    worker.process(job_id)
+    assert get_job(conn, job_id)["stage"] == "done"
+    assert get_job(conn, job_id)["rtzr_transcribe_id"] == "transcribe-1"
+
+    # 이미 과금된 job을 뒤늦게 audio_only로 바꿔도 audio_ready로 되돌아가면 안 된다
+    update_job(conn, job_id, mode="audio_only", stage="submitted")
+    worker.process(job_id)
+
+    assert get_job(conn, job_id)["stage"] == "done"
+
+
+def test_audio_only_url_job_removes_downloaded_video(workspace, monkeypatch):
+    """audio_only로 멈춰도 받은 원본 영상은 정리되어야 한다(오디오는 남는다)."""
+    conn, root = workspace
+
+    def fake_download_url(url, dest_dir, *, filename_stem=None):
+        downloaded = dest_dir / f"{filename_stem}.mp4"
+        downloaded.write_bytes(b"downloaded video")
+        return downloaded
+
+    monkeypatch.setattr("app.worker.download_url", fake_download_url)
+
+    job_id = create_job(
+        conn, title="t", source="https://example.com/v", source_type="url",
+        mode="audio_only",
+    )
+
+    make_worker(conn, root).process(job_id)
+
+    assert get_job(conn, job_id)["stage"] == "audio_ready"
+    assert (root / "media" / f"{job_id}.m4a").exists(), "오디오는 남아야 한다"
+    assert not (root / "media" / f"{job_id}.mp4").exists(), "받은 원본 영상은 지워야 한다"
 
 
 def test_cleanup_keeps_audio_but_removes_downloaded_video(workspace, monkeypatch):
@@ -459,14 +512,19 @@ def test_delete_audio_removes_only_that_jobs_audio(workspace):
     conn, root = workspace
     source = root / "weekly.mp4"
     source.write_bytes(b"video")
-    job_id = create_job(conn, title="t", source=str(source), source_type="file")
     worker = make_worker(conn, root)
+
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
     worker.process(job_id)
+    other_id = create_job(conn, title="other", source=str(source), source_type="file")
+    worker.process(other_id)
     assert (root / "media" / f"{job_id}.m4a").exists()
+    assert (root / "media" / f"{other_id}.m4a").exists()
 
     worker.delete_audio(job_id)
 
     assert not (root / "media" / f"{job_id}.m4a").exists()
+    assert (root / "media" / f"{other_id}.m4a").exists(), "다른 job의 오디오는 건드리면 안 된다"
 
 
 def test_missing_credentials_marks_job_failed_with_guidance(workspace):

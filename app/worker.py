@@ -2,6 +2,7 @@
 import json
 import sqlite3
 import time
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -19,7 +20,7 @@ class Worker:
         self,
         *,
         conn: sqlite3.Connection,
-        asr_factory,
+        asr_factory: Callable[[], object],
         transcripts_dir: Path,
         raw_dir: Path,
         media_dir: Path,
@@ -58,7 +59,7 @@ class Worker:
 
                 audio_path = self._ensure_audio(job)
 
-                if job["mode"] == "audio_only":
+                if job["mode"] == "audio_only" and not job["rtzr_transcribe_id"]:
                     # 1단계까지만 요청받았다. RTZR을 호출하지 않으므로 자격 증명도 불필요하다.
                     # URL로 받은 원본 영상은 여기서도 정리해야 한다(오디오는 남는다).
                     self._cleanup(job_id)
