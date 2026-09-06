@@ -5,14 +5,21 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-# stage 전이: pending → extracted → submitted → fetched → done
+# stage 전이: pending → extracted → audio_ready                 (mode=audio_only)
+#             pending → extracted → submitted → fetched → done  (mode=full)
 # 예외 상태: failed(복구 불가), stalled(결과를 아직 못 받음, 재확인 가능)
-STAGES = ("pending", "extracted", "submitted", "fetched", "done", "failed", "stalled")
+STAGES = (
+    "pending", "extracted", "audio_ready", "submitted", "fetched",
+    "done", "failed", "stalled",
+)
+
+# mode: 처리 범위. audio_only는 오디오 추출까지만 하고 멈춘다.
+MODES = ("audio_only", "full")
 
 UPDATABLE_COLUMNS = frozenset({
     "title", "stage", "audio_path", "rtzr_transcribe_id", "submitted_at",
     "duration_sec", "keywords", "spk_count", "speaker_map", "md_path",
-    "attempts", "last_error",
+    "attempts", "last_error", "mode",
 })
 
 SCHEMA = """
@@ -22,6 +29,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     source              TEXT NOT NULL,
     source_type         TEXT NOT NULL,
     stage               TEXT NOT NULL,
+    mode                TEXT NOT NULL DEFAULT 'full',
     audio_path          TEXT,
     rtzr_transcribe_id  TEXT,
     submitted_at        TEXT,
@@ -34,6 +42,11 @@ CREATE TABLE IF NOT EXISTS jobs (
     last_error          TEXT,
     created_at          TEXT NOT NULL,
     updated_at          TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key    TEXT PRIMARY KEY,
+    value  TEXT NOT NULL
 );
 """
 
@@ -56,7 +69,15 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """구버전 DB에 없는 컬럼을 채운다. 기존 데이터는 그대로 둔다."""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(jobs)")}
+    if "mode" not in columns:
+        conn.execute("ALTER TABLE jobs ADD COLUMN mode TEXT NOT NULL DEFAULT 'full'")
 
 
 def create_job(
@@ -67,17 +88,18 @@ def create_job(
     source_type: str,
     keywords: list[str] | None = None,
     spk_count: int | None = None,
+    mode: str = "full",
 ) -> str:
     job_id = uuid.uuid4().hex[:12]
     timestamp = now_iso()
     conn.execute(
         """
-        INSERT INTO jobs (id, title, source, source_type, stage, keywords,
+        INSERT INTO jobs (id, title, source, source_type, stage, mode, keywords,
                           spk_count, attempts, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'pending', ?, ?, 0, ?, ?)
+        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?)
         """,
         (
-            job_id, title, source, source_type,
+            job_id, title, source, source_type, mode,
             json.dumps(keywords or [], ensure_ascii=False),
             spk_count, timestamp, timestamp,
         ),
@@ -116,5 +138,20 @@ def update_job(conn: sqlite3.Connection, job_id: str, **fields) -> None:
     conn.execute(
         f"UPDATE jobs SET {assignments}, updated_at = ? WHERE id = ?",
         (*fields.values(), now_iso(), job_id),
+    )
+    conn.commit()
+
+
+def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
+    cursor = conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = cursor.fetchone()
+    return row["value"] if row else None
+
+
+def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
     )
     conn.commit()
