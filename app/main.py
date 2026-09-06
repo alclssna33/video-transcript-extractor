@@ -10,7 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import load_config
 from app.credentials import make_asr_client
-from app.db import connect, create_job, get_job, init_db, list_jobs, update_job
+from app.db import MODES, connect, create_job, get_job, init_db, list_jobs, update_job
 from app.renderer import audio_filename, format_timestamp
 from app.worker import Worker
 
@@ -18,7 +18,7 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
 def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
-    config = load_config()  # 자격 증명이 없으면 여기서 즉시 실패한다
+    config = load_config()  # 자격 증명은 선택 — 없으면 설정 화면에서 입력한다
     app = FastAPI(title="영상 대본 추출기")
 
     conn = connect(config.db_path)
@@ -85,6 +85,9 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
                 status_code=400,
             )
 
+        if mode not in MODES:
+            raise HTTPException(status_code=400, detail=f"알 수 없는 처리 범위입니다: {mode}")
+
         job_id = create_job(
             conn,
             title=title.strip() or "제목없음",
@@ -92,7 +95,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
             source_type="url" if is_url else "file",
             keywords=[k.strip() for k in keywords.split(",") if k.strip()],
             spk_count=int(spk_count) if spk_count.strip().isdigit() else None,
-            mode="audio_only" if mode == "audio_only" else "full",
+            mode=mode,
         )
         _schedule(app, job_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
@@ -170,6 +173,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
             raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
 
         await asyncio.to_thread(worker.delete_audio, job_id)
+        update_job(conn, job_id, audio_path=None)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
     @app.post("/jobs/{job_id}/transcribe")

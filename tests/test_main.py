@@ -1,12 +1,14 @@
 import json
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.db import create_job, get_job, list_jobs
 from app.main import create_app
+from app.renderer import audio_filename
 
 FIXTURE = json.loads(
     (Path(__file__).parent / "fixtures" / "rtzr_response.json").read_text(encoding="utf-8")
@@ -256,9 +258,9 @@ def test_audio_download_returns_file(client, tmp_path):
 
     assert response.status_code == 200
     # Starlette는 Content-Disposition의 파일명을 RFC 5987 percent-encoding으로 내보낸다.
-    from urllib.parse import quote
-
-    assert quote("주간회의") in response.headers["content-disposition"]
+    job = get_job(client.app.state.conn, job_id)
+    expected = quote(audio_filename(job["created_at"], job["title"]))
+    assert expected in response.headers["content-disposition"]
     assert response.content == b"audio"
 
 
@@ -271,6 +273,26 @@ def test_audio_download_404_when_no_audio(client):
     assert response.status_code == 404
 
 
+def test_audio_download_404_for_unknown_job(client):
+    assert client.get("/jobs/nonexistent/audio").status_code == 404
+
+
+def test_audio_delete_404_for_unknown_job(client):
+    assert client.post("/jobs/nonexistent/audio/delete").status_code == 404
+
+
+def test_submit_rejects_unknown_mode(client, tmp_path):
+    """알 수 없는 값을 조용히 full로 바꾸면 의도치 않게 RTZR 크레딧을 쓴다."""
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+
+    response = client.post(
+        "/jobs", data={"source": str(video), "title": "t", "mode": "AUDIO_ONLY"}
+    )
+
+    assert response.status_code == 400
+
+
 def test_transcribe_continues_audio_ready_job(client, tmp_path):
     video = tmp_path / "weekly.mp4"
     video.write_bytes(b"video")
@@ -281,6 +303,8 @@ def test_transcribe_continues_audio_ready_job(client, tmp_path):
     )
     job_id = created.headers["location"].rsplit("/", 1)[-1]
     wait_for_stage(client, job_id, {"audio_ready", "failed"})
+
+    video.unlink()  # 재추출이 일어나면 원본이 없어 실패한다
 
     response = client.post(f"/jobs/{job_id}/transcribe", follow_redirects=False)
 
@@ -319,6 +343,24 @@ def test_delete_audio_removes_file(client, tmp_path):
 
     assert response.status_code == 303
     assert client.get(f"/jobs/{job_id}/audio").status_code == 404
+
+
+def test_delete_audio_clears_audio_path(client, tmp_path):
+    """경로가 남아 있으면 UI가 죽은 다운로드 버튼을 계속 보여준다."""
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+    created = client.post(
+        "/jobs",
+        data={"source": str(video), "title": "삭제", "mode": "audio_only"},
+        follow_redirects=False,
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    wait_for_stage(client, job_id, {"audio_ready", "failed"})
+    assert get_job(client.app.state.conn, job_id)["audio_path"] is not None
+
+    client.post(f"/jobs/{job_id}/audio/delete", follow_redirects=False)
+
+    assert get_job(client.app.state.conn, job_id)["audio_path"] is None
 
 
 def test_inbox_files_are_picked_up(tmp_path, monkeypatch):

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.renderer import format_timestamp, render_markdown, transcript_filename
+from app.renderer import audio_filename, format_timestamp, render_markdown, transcript_filename
 
 FIXTURE = json.loads(
     (Path(__file__).parent / "fixtures" / "rtzr_response.json").read_text(encoding="utf-8")
@@ -39,8 +39,6 @@ def test_render_applies_speaker_map():
 
 
 def test_audio_filename_matches_transcript_naming():
-    from app.renderer import audio_filename
-
     assert audio_filename("2026-09-03T14:22:00+09:00", "주간회의") == "2026-09-03-주간회의.m4a"
 
 
