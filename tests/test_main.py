@@ -412,10 +412,13 @@ def test_settings_rejects_partial_input(client):
     )
 
     assert response.status_code == 400
+    assert "돌아가기" in response.text
 
 
 def test_saved_settings_win_over_env(client):
     """설정 화면 값이 .env보다 우선해야 한다."""
+    assert ".env 파일" in client.get("/settings").text  # 저장 전에는 .env 출처
+
     client.post(
         "/settings",
         data={"client_id": "db-id", "client_secret": "db-secret-9999"},
@@ -425,27 +428,66 @@ def test_saved_settings_win_over_env(client):
     response = client.get("/settings")
 
     assert "9999" in response.text
-    assert "설정 화면" in response.text  # 출처 표시
+    assert "설정 화면" in response.text
 
 
-def test_index_warns_when_credentials_missing(tmp_path, monkeypatch):
-    """자격 증명이 없으면 메인 화면이 안내해야 한다 — 오디오 추출은 여전히 가능하다."""
+def test_clearing_settings_falls_back_to_env(client):
+    """오타를 저장해도 되돌릴 수 있어야 한다 — 지우면 .env로 복귀."""
+    client.post(
+        "/settings",
+        data={"client_id": "db-id", "client_secret": "db-secret-9999"},
+        follow_redirects=False,
+    )
+    assert "설정 화면" in client.get("/settings").text
+
+    response = client.post("/settings/clear", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert get_setting(client.app.state.conn, CLIENT_ID_KEY) is None
+    assert get_setting(client.app.state.conn, CLIENT_SECRET_KEY) is None
+    assert ".env 파일" in client.get("/settings").text  # 픽스처가 env를 설정해 둔다
+
+
+def test_clear_button_hidden_when_credentials_come_from_env(client):
+    """지울 DB 값이 없으면 버튼을 보여줄 이유가 없다."""
+    response = client.get("/settings")
+
+    assert ".env 파일" in response.text
+    assert "저장된 값 지우기" not in response.text
+
+
+def test_app_without_credentials_warns_but_still_extracts_audio(tmp_path, monkeypatch):
+    """자격 증명이 없어도 앱은 뜨고, 오디오 추출(1단계)은 동작해야 한다."""
     monkeypatch.delenv("RTZR_CLIENT_ID", raising=False)
     monkeypatch.delenv("RTZR_CLIENT_SECRET", raising=False)
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
-    # 개발 환경의 실제 .env가 있어도 이 테스트는 "자격 증명 없음"을 재현해야 한다.
     monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "app.worker.extract_audio", lambda source, dest: (Path(dest).write_bytes(b"a"), Path(dest))[1]
-    )
+
+    def fake_extract(source, dest):
+        Path(dest).write_bytes(b"audio")
+        return Path(dest)
+
+    monkeypatch.setattr("app.worker.extract_audio", fake_extract)
     monkeypatch.setattr("app.worker.probe_duration", lambda path: 60.0)
 
-    app = create_app(poll_interval=0)   # asr 주입 없음 — 진짜 팩토리를 쓴다
-    with TestClient(app) as unconfigured:
-        response = unconfigured.get("/")
+    video = tmp_path / "lecture.mp4"
+    video.write_bytes(b"video")
 
-    assert response.status_code == 200
-    assert "설정" in response.text
+    app = create_app(poll_interval=0)  # asr 주입 없음 — 진짜 팩토리를 쓴다
+    with TestClient(app) as unconfigured:
+        index = unconfigured.get("/")
+        assert index.status_code == 200
+        assert "자격 증명이 설정되지 않았습니다" in index.text
+
+        created = unconfigured.post(
+            "/jobs",
+            data={"source": str(video), "title": "강의", "mode": "audio_only"},
+            follow_redirects=False,
+        )
+        job_id = created.headers["location"].rsplit("/", 1)[-1]
+        stage = wait_for_stage(unconfigured, job_id, {"audio_ready", "failed"})
+
+    assert stage == "audio_ready", "자격 증명 없이도 오디오 추출은 성공해야 한다"
 
 
 def test_inbox_files_are_picked_up(tmp_path, monkeypatch):

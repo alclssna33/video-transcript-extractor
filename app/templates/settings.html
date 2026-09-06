@@ -21,4 +21,10 @@
   </div>
   <button type="submit">저장</button>
 </form>
+{% if credentials and credentials.source == 'db' %}
+<form method="post" action="/settings/clear">
+  <button type="submit">저장된 값 지우기</button>
+  <div class="hint">설정 화면 값을 지웁니다. .env에 값이 있으면 그 값으로 되돌아갑니다.</div>
+</form>
+{% endif %}
 {% endblock %}

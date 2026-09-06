@@ -50,7 +50,9 @@ class RtzrClient:
             data={"client_id": self._client_id, "client_secret": self._client_secret},
         )
         if response.status_code in (401, 403):
-            raise AsrAuthError("RTZR 자격 증명이 거부되었습니다. .env의 값을 확인하세요.")
+            raise AsrAuthError(
+                "RTZR 자격 증명이 거부되었습니다. 설정 화면에서 client_id와 client_secret을 확인하세요."
+            )
         if response.status_code >= 500:
             raise AsrTemporaryError(f"인증 서버 오류 {response.status_code}")
         if response.status_code != 200:

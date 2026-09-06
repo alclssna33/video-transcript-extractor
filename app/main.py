@@ -223,12 +223,21 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
         client_id = client_id.strip()
         client_secret = client_secret.strip()
         if not client_id or not client_secret:
-            raise HTTPException(
-                status_code=400, detail="client_id와 client_secret을 모두 입력하세요."
+            return HTMLResponse(
+                "<p>client_id와 client_secret을 모두 입력하세요.</p>"
+                "<p><a href='/settings'>돌아가기</a></p>",
+                status_code=400,
             )
 
         set_setting(conn, CLIENT_ID_KEY, client_id)
         set_setting(conn, CLIENT_SECRET_KEY, client_secret)
+        return RedirectResponse("/settings", status_code=303)
+
+    @app.post("/settings/clear")
+    async def clear_settings():
+        """설정 화면 값을 지운다. .env에 값이 있으면 그쪽으로 되돌아간다."""
+        set_setting(conn, CLIENT_ID_KEY, "")
+        set_setting(conn, CLIENT_SECRET_KEY, "")
         return RedirectResponse("/settings", status_code=303)
 
     @app.post("/jobs/{job_id}/retry")
