@@ -76,7 +76,9 @@
           {%- elif job['stage'] in ('failed', 'stalled') %} badge--danger
           {%- else %} badge--warn{% endif %}">{{ job['stage'] }}</span>
       </td>
-      <td class="hint" style="margin:0">{{ job['created_at'][:16].replace('T', ' ') }}</td>
+      <td class="hint" style="margin:0">
+        <time class="js-local-time" datetime="{{ job['created_at'] }}">{{ job['created_at'][:16].replace('T', ' ') }}</time>
+      </td>
     </tr>
     {% endfor %}
   </tbody>
@@ -89,6 +91,17 @@
 {% endif %}
 
 <script>
+  // 서버는 UTC로 저장한다. 보는 사람의 시간대로 바꿔 표시한다.
+  document.querySelectorAll('.js-local-time').forEach((element) => {
+    const parsed = new Date(element.dateTime);
+    if (!isNaN(parsed)) {
+      element.textContent = parsed.toLocaleString(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit',
+      });
+    }
+  });
+
   // 제출 피드백: 버튼을 비활성화해 중복 제출과 "눌렸나?" 혼란을 막는다.
   document.getElementById('submit-form')?.addEventListener('submit', () => {
     const button = document.getElementById('submit-btn');

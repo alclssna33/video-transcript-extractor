@@ -23,7 +23,7 @@
 {% endif %}
 
 <div class="btn-row">
-  {% if job['audio_path'] %}
+  {% if audio_exists %}
   <a class="btn" href="/jobs/{{ job['id'] }}/audio">오디오 다운로드 (.m4a)</a>
   {% endif %}
 
@@ -39,7 +39,7 @@
   </form>
   {% endif %}
 
-  {% if job['audio_path'] %}
+  {% if audio_exists %}
   <form method="post" action="/jobs/{{ job['id'] }}/audio/delete">
     <button class="btn" type="submit">오디오 삭제</button>
   </form>
@@ -96,4 +96,27 @@
 {% elif job['stage'] != 'audio_ready' %}
 <div class="empty">아직 전사 결과가 없습니다.</div>
 {% endif %}
+
+<script>
+  // 진행 중이면 상태를 폴링하다가 바뀌면 화면을 새로 그린다.
+  // (상세 화면은 단계마다 보여줄 버튼이 달라져서 부분 갱신보다 새로고침이 단순하다.)
+  const TERMINAL = ['done', 'failed', 'stalled', 'audio_ready'];
+  const current = {{ job['stage'] | tojson }};
+
+  if (!TERMINAL.includes(current)) {
+    const poll = async () => {
+      try {
+        const response = await fetch(`/jobs/{{ job['id'] }}/status`);
+        if (response.ok && (await response.json()).stage !== current) {
+          location.reload();
+          return;
+        }
+      } catch (error) {
+        // 일시적인 실패는 무시하고 다음 주기에 다시 시도한다
+      }
+      setTimeout(poll, 3000);
+    };
+    setTimeout(poll, 3000);
+  }
+</script>
 {% endblock %}

@@ -531,3 +531,25 @@ def test_inbox_file_is_not_duplicated_on_restart(tmp_path, monkeypatch):
         titles = [job["title"] for job in list_jobs(client.app.state.conn)]
 
     assert titles.count("강의녹화") == 1
+
+
+def test_detail_hides_audio_buttons_when_file_is_gone(client, tmp_path):
+    """예전 규칙으로 오디오가 지워진 job은 죽은 다운로드 버튼을 보여주면 안 된다."""
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+    created = client.post(
+        "/jobs",
+        data={"source": str(video), "title": "옛날작업", "mode": "audio_only"},
+        follow_redirects=False,
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    wait_for_stage(client, job_id, {"audio_ready", "failed"})
+    assert "오디오 다운로드" in client.get(f"/jobs/{job_id}").text
+
+    # DB에는 경로가 남은 채 파일만 사라진 상태를 만든다(예전 정리 규칙의 결과)
+    Path(get_job(client.app.state.conn, job_id)["audio_path"]).unlink()
+
+    response = client.get(f"/jobs/{job_id}")
+
+    assert "오디오 다운로드" not in response.text
+    assert "오디오 삭제" not in response.text

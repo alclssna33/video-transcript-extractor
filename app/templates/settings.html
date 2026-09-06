@@ -13,7 +13,7 @@
     <div class="field">
       <label for="client_secret">RTZR client_secret</label>
       <input id="client_secret" name="client_secret" type="password"
-             placeholder="{{ '변경하려면 새 값을 입력하세요' if masked_secret else '' }}" required>
+             placeholder="{{ '저장하려면 secret을 다시 입력하세요' if masked_secret else '' }}" required>
       {% if masked_secret %}
       <p class="hint">
         현재 저장됨: <span class="mono">{{ masked_secret }}</span>

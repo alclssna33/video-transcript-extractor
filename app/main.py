@@ -126,6 +126,9 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
                 utterances.append({**item, "timestamp": format_timestamp(item["start_at"])})
             speaker_ids = sorted({item["spk"] for item in utterances})
 
+        audio_path = Path(job["audio_path"]) if job["audio_path"] else None
+        audio_exists = audio_path is not None and audio_path.exists()
+
         return TEMPLATES.TemplateResponse(
             request,
             "detail.html",
@@ -134,6 +137,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
                 "utterances": utterances,
                 "speaker_ids": speaker_ids,
                 "speaker_map": json.loads(job["speaker_map"] or "{}"),
+                "audio_exists": audio_exists,
             },
         )
 
