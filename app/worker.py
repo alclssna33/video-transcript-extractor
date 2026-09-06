@@ -19,14 +19,15 @@ class Worker:
         self,
         *,
         conn: sqlite3.Connection,
-        asr,
+        asr_factory,
         transcripts_dir: Path,
         raw_dir: Path,
         media_dir: Path,
         poll_interval: float = 5.0,
     ):
         self._conn = conn
-        self._asr = asr
+        # 자격 증명이 실행 중에 바뀔 수 있으므로 사용 시점에 만든다.
+        self._asr_factory = asr_factory
         self._transcripts_dir = transcripts_dir
         self._raw_dir = raw_dir
         self._media_dir = media_dir
@@ -56,8 +57,19 @@ class Worker:
                     return
 
                 audio_path = self._ensure_audio(job)
-                transcribe_id = self._ensure_submitted(job_id, job, audio_path)
-                payload = self._await_result(transcribe_id)
+
+                if job["mode"] == "audio_only":
+                    # 1단계까지만 요청받았다. RTZR을 호출하지 않으므로 자격 증명도 불필요하다.
+                    # URL로 받은 원본 영상은 여기서도 정리해야 한다(오디오는 남는다).
+                    self._cleanup(job_id)
+                    update_job(
+                        self._conn, job_id, stage="audio_ready", last_error=None
+                    )
+                    return
+
+                asr = self._asr_factory()
+                transcribe_id = self._ensure_submitted(job_id, job, audio_path, asr)
+                payload = self._await_result(transcribe_id, asr)
 
                 raw_path.write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -116,12 +128,14 @@ class Worker:
         )
         return audio_path
 
-    def _ensure_submitted(self, job_id: str, job: sqlite3.Row, audio_path: Path) -> str:
+    def _ensure_submitted(
+        self, job_id: str, job: sqlite3.Row, audio_path: Path, asr
+    ) -> str:
         if job["rtzr_transcribe_id"]:
             return job["rtzr_transcribe_id"]
 
         keywords = json.loads(job["keywords"] or "[]")
-        transcribe_id = self._asr.submit(
+        transcribe_id = asr.submit(
             audio_path, keywords=keywords or None, spk_count=job["spk_count"]
         )
         # 제출 즉시 저장한다 — 여기가 재시작 복구의 핵심이다.
@@ -133,11 +147,11 @@ class Worker:
         )
         return transcribe_id
 
-    def _await_result(self, transcribe_id: str) -> dict:
+    def _await_result(self, transcribe_id: str, asr) -> dict:
         interval = self._poll_interval
         for _ in range(MAX_POLL_ATTEMPTS):
             try:
-                payload = self._asr.poll(transcribe_id)
+                payload = asr.poll(transcribe_id)
             except AsrTemporaryError:
                 time.sleep(interval)
                 interval = min(interval * 2, 30.0)
@@ -160,17 +174,27 @@ class Worker:
         return datetime.now(timezone.utc) - submitted > timedelta(days=RESULT_RETENTION_DAYS)
 
     def _cleanup(self, job_id: str) -> None:
-        """추출 오디오와 yt-dlp가 받은 원본을 지운다.
+        """yt-dlp가 받은 원본 영상만 지운다.
 
-        사용자의 로컬 원본 파일과 raw/{id}.json은 건드리지 않는다.
-        정리 실패(파일 잠금 등)가 이미 완료된 job을 failed로 만들면 안 되므로
-        예외를 삼킨다.
+        추출된 오디오(.m4a)는 사용자가 외부 도구로 가져갈 수 있어야 하므로 남긴다.
+        사용자의 로컬 원본 파일과 raw/{id}.json도 건드리지 않는다.
+        정리 실패(파일 잠금 등)가 이미 완료된 job을 failed로 만들면 안 되므로 예외를 삼킨다.
         """
         for path in self._media_dir.glob(f"{job_id}.*"):
+            if path.suffix.lower() == ".m4a":
+                continue
             try:
                 path.unlink(missing_ok=True)
             except OSError:
                 pass
+
+    def delete_audio(self, job_id: str) -> None:
+        """사용자가 오디오를 직접 지운다. 이후 전사를 요청하면 원본에서 다시 추출된다."""
+        audio_path = self._media_dir / f"{job_id}.m4a"
+        try:
+            audio_path.unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def _write_markdown(self, job_id: str, payload: dict, *, speaker_map: dict) -> Path:
         job = get_job(self._conn, job_id)

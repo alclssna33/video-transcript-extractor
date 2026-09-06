@@ -8,8 +8,8 @@ from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app.asr_client import RtzrClient
 from app.config import load_config
+from app.credentials import make_asr_client
 from app.db import connect, create_job, get_job, init_db, list_jobs
 from app.renderer import format_timestamp
 from app.worker import Worker
@@ -26,7 +26,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
 
     worker = Worker(
         conn=conn,
-        asr=asr or RtzrClient(config.client_id, config.client_secret),
+        asr_factory=(lambda: asr) if asr is not None else (lambda: make_asr_client(conn, config)),
         transcripts_dir=config.transcripts_dir,
         raw_dir=config.raw_dir,
         media_dir=config.media_dir,

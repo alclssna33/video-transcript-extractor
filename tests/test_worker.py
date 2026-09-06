@@ -44,9 +44,10 @@ def workspace(tmp_path, monkeypatch):
 
 
 def make_worker(conn, tmp_path, asr=None):
+    client = asr or FakeAsr()
     return Worker(
         conn=conn,
-        asr=asr or FakeAsr(),
+        asr_factory=lambda: client,
         transcripts_dir=tmp_path / "transcripts",
         raw_dir=tmp_path / "raw",
         media_dir=tmp_path / "media",
@@ -318,7 +319,7 @@ def test_media_files_are_cleaned_up_after_success(workspace):
 
     make_worker(conn, root).process(job_id)
 
-    assert not (root / "media" / f"{job_id}.m4a").exists()
+    assert (root / "media" / f"{job_id}.m4a").exists(), "오디오는 사용자 산출물이므로 남긴다"
     assert source.exists(), "사용자의 원본 파일은 지우지 않는다"
     assert (root / "raw" / f"{job_id}.json").exists(), "raw JSON은 영구 보관한다"
 
@@ -343,7 +344,9 @@ def test_media_files_are_cleaned_up_after_success_for_url_source(workspace, monk
     job = get_job(conn, job_id)
     assert job["stage"] == "done"
     leftover = list((root / "media").glob(f"{job_id}.*"))
-    assert leftover == [], f"정리되지 않은 파일이 남아있습니다: {leftover}"
+    assert leftover == [root / "media" / f"{job_id}.m4a"], (
+        f"오디오만 남고 나머지는 정리되어야 합니다: {leftover}"
+    )
 
 
 def test_stalled_job_completes_on_retry_without_resubmitting(workspace):
@@ -381,3 +384,154 @@ def test_stalled_job_completes_on_retry_without_resubmitting(workspace):
     job = get_job(conn, job_id)
     assert job["stage"] == "done"
     assert len(asr.submitted) == submitted_count_before_retry  # 재제출 없었음
+
+
+def test_audio_only_mode_stops_at_audio_ready_without_calling_asr(workspace):
+    """오디오만 뽑는 모드는 RTZR을 아예 호출하면 안 된다(크레딧을 쓰지 않는다)."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(
+        conn, title="t", source=str(source), source_type="file", mode="audio_only"
+    )
+
+    class ForbiddenAsr(FakeAsr):
+        def submit(self, *args, **kwargs):
+            raise AssertionError("audio_only 모드에서는 submit()이 호출되면 안 된다")
+
+        def poll(self, transcribe_id):
+            raise AssertionError("audio_only 모드에서는 poll()이 호출되면 안 된다")
+
+    make_worker(conn, root, asr=ForbiddenAsr()).process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "audio_ready"
+    assert Path(job["audio_path"]).exists()
+    assert job["md_path"] is None
+
+
+def test_audio_only_job_completes_when_switched_to_full(workspace):
+    """이어서 스크립트 추출: 오디오 재추출 없이 전사까지 끝나야 한다."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(
+        conn, title="t", source=str(source), source_type="file", mode="audio_only"
+    )
+    worker = make_worker(conn, root)
+    worker.process(job_id)
+    assert get_job(conn, job_id)["stage"] == "audio_ready"
+
+    original_audio_path = get_job(conn, job_id)["audio_path"]
+
+    update_job(conn, job_id, mode="full")
+    worker.process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "done"
+    assert job["audio_path"] == original_audio_path  # 같은 오디오를 재사용
+    assert Path(job["md_path"]).exists()
+
+
+def test_cleanup_keeps_audio_but_removes_downloaded_video(workspace, monkeypatch):
+    """오디오는 사용자가 가져갈 산출물이므로 남기고, 받은 원본 영상만 지운다."""
+    conn, root = workspace
+
+    def fake_download_url(url, dest_dir, *, filename_stem=None):
+        downloaded = dest_dir / f"{filename_stem}.mp4"
+        downloaded.write_bytes(b"downloaded video")
+        return downloaded
+
+    monkeypatch.setattr("app.worker.download_url", fake_download_url)
+
+    job_id = create_job(
+        conn, title="t", source="https://example.com/v", source_type="url"
+    )
+
+    make_worker(conn, root).process(job_id)
+
+    assert get_job(conn, job_id)["stage"] == "done"
+    assert (root / "media" / f"{job_id}.m4a").exists(), "오디오는 남아야 한다"
+    assert not (root / "media" / f"{job_id}.mp4").exists(), "받은 원본 영상은 지워야 한다"
+
+
+def test_delete_audio_removes_only_that_jobs_audio(workspace):
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
+    worker = make_worker(conn, root)
+    worker.process(job_id)
+    assert (root / "media" / f"{job_id}.m4a").exists()
+
+    worker.delete_audio(job_id)
+
+    assert not (root / "media" / f"{job_id}.m4a").exists()
+
+
+def test_missing_credentials_marks_job_failed_with_guidance(workspace):
+    """자격 증명이 없으면 안내 문구와 함께 실패해야 한다."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(conn, title="t", source=str(source), source_type="file")
+
+    def exploding_factory():
+        from app.credentials import CredentialsMissingError
+        raise CredentialsMissingError("RTZR 자격 증명이 없습니다. 설정 화면에서 입력하세요.")
+
+    worker = Worker(
+        conn=conn,
+        asr_factory=exploding_factory,
+        transcripts_dir=root / "transcripts",
+        raw_dir=root / "raw",
+        media_dir=root / "media",
+        poll_interval=0,
+    )
+    worker.process(job_id)
+
+    job = get_job(conn, job_id)
+    assert job["stage"] == "failed"
+    assert "설정" in job["last_error"]
+
+
+def test_audio_ready_is_not_auto_resumed(workspace):
+    """audio_ready는 '요청한 일을 끝낸' 상태다. 앱 재시작 때 멋대로 전사가 시작되면 안 된다."""
+    conn, root = workspace
+    job_id = create_job(
+        conn, title="t", source="s", source_type="file", mode="audio_only"
+    )
+    update_job(conn, job_id, stage="audio_ready")
+    worker = make_worker(conn, root)
+
+    worker.recover()
+
+    assert get_job(conn, job_id)["stage"] == "audio_ready"  # 되돌려지지 않음
+    assert job_id not in worker.pending_job_ids()
+    assert job_id not in worker.resumable_job_ids()
+    assert job_id not in worker.fetched_job_ids()
+
+
+def test_audio_only_job_does_not_need_credentials(workspace):
+    """1단계는 RTZR 없이도 되어야 한다 — 외부 도구만 쓸 사람을 위해."""
+    conn, root = workspace
+    source = root / "weekly.mp4"
+    source.write_bytes(b"video")
+    job_id = create_job(
+        conn, title="t", source=str(source), source_type="file", mode="audio_only"
+    )
+
+    def exploding_factory():
+        raise AssertionError("audio_only 모드에서는 자격 증명을 요구하면 안 된다")
+
+    worker = Worker(
+        conn=conn,
+        asr_factory=exploding_factory,
+        transcripts_dir=root / "transcripts",
+        raw_dir=root / "raw",
+        media_dir=root / "media",
+        poll_interval=0,
+    )
+    worker.process(job_id)
+
+    assert get_job(conn, job_id)["stage"] == "audio_ready"
