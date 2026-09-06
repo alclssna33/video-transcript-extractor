@@ -8,7 +8,7 @@
   <li><span class="mono">{{ job['source'] }}</span></li>
   <li>
     상태:
-    <span class="badge
+    <span class="badge js-stage
       {%- if job['stage'] in ('done', 'audio_ready') %} badge--ok
       {%- elif job['stage'] in ('failed', 'stalled') %} badge--danger
       {%- else %} badge--warn{% endif %}">{{ job['stage'] }}</span>
@@ -98,18 +98,35 @@
 {% endif %}
 
 <script>
-  // 진행 중이면 상태를 폴링하다가 바뀌면 화면을 새로 그린다.
-  // (상세 화면은 단계마다 보여줄 버튼이 달라져서 부분 갱신보다 새로고침이 단순하다.)
+  // 진행 중이면 상태를 폴링한다.
+  // 중간 단계(pending·extracted·submitted·fetched)는 보여줄 내용이 거의 같으므로
+  // 뱃지만 갱신하고, 끝난 시점에만 새로고침한다 — 버튼과 전사 내용이 그때 달라지기 때문이다.
   const TERMINAL = ['done', 'failed', 'stalled', 'audio_ready'];
-  const current = {{ job['stage'] | tojson }};
+  const startStage = {{ job['stage'] | tojson }};
 
-  if (!TERMINAL.includes(current)) {
+  if (!TERMINAL.includes(startStage)) {
+    const badge = document.querySelector('.js-stage');
+
+    const badgeClass = (stage) =>
+      'badge js-stage ' + (
+        (stage === 'done' || stage === 'audio_ready') ? 'badge--ok'
+        : (stage === 'failed' || stage === 'stalled') ? 'badge--danger'
+        : 'badge--warn'
+      );
+
     const poll = async () => {
       try {
         const response = await fetch(`/jobs/{{ job['id'] }}/status`);
-        if (response.ok && (await response.json()).stage !== current) {
-          location.reload();
-          return;
+        if (response.ok) {
+          const stage = (await response.json()).stage;
+          if (TERMINAL.includes(stage)) {
+            location.reload();   // 버튼·전사 내용이 바뀌므로 다시 그린다
+            return;
+          }
+          if (badge && stage !== badge.textContent.trim()) {
+            badge.textContent = stage;
+            badge.className = badgeClass(stage);
+          }
         }
       } catch (error) {
         // 일시적인 실패는 무시하고 다음 주기에 다시 시도한다
