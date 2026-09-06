@@ -1,5 +1,6 @@
 import pytest
 
+from app.asr_client import RtzrClient
 from app.config import Config
 from app.credentials import (
     CLIENT_ID_KEY,
@@ -51,13 +52,17 @@ def test_db_setting_wins_over_env(tmp_path):
 
 
 def test_partial_db_setting_falls_back_to_env(tmp_path):
-    """id만 저장되고 secret이 없으면 DB 설정은 무효로 본다."""
+    """한쪽만 저장된 DB 설정은 무효다 — 자격 증명은 쌍으로만 유효하다."""
     conn = make_conn(tmp_path)
     set_setting(conn, CLIENT_ID_KEY, "db-id")
 
-    credentials = resolve_credentials(conn, env_config(tmp_path, "env-id", "env-secret"))
+    assert resolve_credentials(conn, env_config(tmp_path, "env-id", "env-secret")).source == "env"
 
-    assert credentials.source == "env"
+    # 반대 방향: secret만 있는 경우
+    set_setting(conn, CLIENT_ID_KEY, "")
+    set_setting(conn, CLIENT_SECRET_KEY, "db-secret")
+
+    assert resolve_credentials(conn, env_config(tmp_path, "env-id", "env-secret")).source == "env"
 
 
 def test_partial_env_config_is_treated_as_unconfigured(tmp_path):
@@ -95,9 +100,11 @@ def test_make_asr_client_builds_client_from_credentials(tmp_path):
     set_setting(conn, CLIENT_ID_KEY, "db-id")
     set_setting(conn, CLIENT_SECRET_KEY, "db-secret")
 
-    client = make_asr_client(conn, env_config(tmp_path))
+    # env에도 값을 넣어 DB 우선이 팩토리를 통해서도 지켜지는지 함께 확인한다
+    client = make_asr_client(conn, env_config(tmp_path, "env-id", "env-secret"))
 
-    assert client is not None
+    assert isinstance(client, RtzrClient)
+    assert (client._client_id, client._client_secret) == ("db-id", "db-secret")
 
 
 def test_mask_secret_shows_only_last_four():
@@ -106,3 +113,12 @@ def test_mask_secret_shows_only_last_four():
 
 def test_mask_secret_hides_short_values_entirely():
     assert mask_secret("abc") == "••••"
+    assert mask_secret("abcd") == "••••"   # 경계값: 4자는 전부 가려야 한다
+
+
+def test_mask_secret_reveals_last_four_just_past_boundary():
+    assert mask_secret("abcde") == "••••bcde"
+
+
+def test_mask_secret_returns_empty_for_empty_input():
+    assert mask_secret("") == ""

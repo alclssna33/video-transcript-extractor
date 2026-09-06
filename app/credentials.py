@@ -4,7 +4,7 @@
 자격 증명이 없어도 앱은 떠야 하므로, 실패는 부팅이 아니라 '사용 시점'에 발생한다.
 """
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.asr_client import RtzrClient
 from app.config import Config
@@ -21,7 +21,7 @@ class CredentialsMissingError(Exception):
 @dataclass(frozen=True)
 class Credentials:
     client_id: str
-    client_secret: str
+    client_secret: str = field(repr=False)
     source: str  # "db" | "env"
 
 
@@ -52,7 +52,12 @@ def make_asr_client(conn: sqlite3.Connection, config: Config) -> RtzrClient:
 
 
 def mask_secret(value: str) -> str:
-    """설정 화면에는 저장 여부와 끝 4자리만 보여준다."""
+    """설정 화면에는 저장 여부와 끝 4자리만 보여준다.
+
+    빈 값은 '설정 없음'이므로 마스킹하지 않는다 — ••••로 보이면 설정된 것처럼 오해된다.
+    """
+    if not value:
+        return ""
     if len(value) <= 4:
         return "••••"
     return "••••" + value[-4:]
