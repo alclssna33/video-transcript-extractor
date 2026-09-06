@@ -29,6 +29,17 @@ def wait_for_done(client, job_id, attempts=100):
     raise AssertionError(f"작업이 끝나지 않았습니다: {job_id}")
 
 
+def wait_for_stage(client, job_id, wanted, attempts=100):
+    """지정한 stage 집합 중 하나에 도달할 때까지 기다린다."""
+    for _ in range(attempts):
+        response = client.get(f"/jobs/{job_id}/status")
+        stage = response.json().get("stage") if response.status_code == 200 else None
+        if stage in wanted:
+            return stage
+        time.sleep(0.05)
+    raise AssertionError(f"작업이 {wanted}에 도달하지 않았습니다: {job_id}")
+
+
 class FakeAsr:
     def submit(self, audio_path, *, keywords=None, spk_count=None):
         return "transcribe-1"
@@ -197,6 +208,117 @@ def test_retry_reschedules_stalled_job(client, tmp_path):
 def test_retry_rejects_unknown_job(client):
     response = client.post("/jobs/nonexistent-id/retry")
     assert response.status_code == 404
+
+
+def test_submit_with_audio_only_mode_stops_at_audio_ready(client, tmp_path):
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+
+    created = client.post(
+        "/jobs",
+        data={"source": str(video), "title": "오디오만", "mode": "audio_only"},
+        follow_redirects=False,
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    stage = wait_for_stage(client, job_id, {"audio_ready", "failed"})
+
+    assert stage == "audio_ready"
+    job = get_job(client.app.state.conn, job_id)
+    assert job["mode"] == "audio_only"
+    assert job["md_path"] is None
+
+
+def test_submit_defaults_to_full_mode(client, tmp_path):
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+
+    created = client.post(
+        "/jobs", data={"source": str(video), "title": "기본값"}, follow_redirects=False
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    wait_for_stage(client, job_id, {"done", "failed"})
+
+    assert get_job(client.app.state.conn, job_id)["mode"] == "full"
+
+
+def test_audio_download_returns_file(client, tmp_path):
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+    created = client.post(
+        "/jobs",
+        data={"source": str(video), "title": "주간회의", "mode": "audio_only"},
+        follow_redirects=False,
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    wait_for_stage(client, job_id, {"audio_ready", "failed"})
+
+    response = client.get(f"/jobs/{job_id}/audio")
+
+    assert response.status_code == 200
+    # Starlette는 Content-Disposition의 파일명을 RFC 5987 percent-encoding으로 내보낸다.
+    from urllib.parse import quote
+
+    assert quote("주간회의") in response.headers["content-disposition"]
+    assert response.content == b"audio"
+
+
+def test_audio_download_404_when_no_audio(client):
+    conn = client.app.state.conn
+    job_id = create_job(conn, title="t", source="s", source_type="file")
+
+    response = client.get(f"/jobs/{job_id}/audio")
+
+    assert response.status_code == 404
+
+
+def test_transcribe_continues_audio_ready_job(client, tmp_path):
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+    created = client.post(
+        "/jobs",
+        data={"source": str(video), "title": "이어서", "mode": "audio_only"},
+        follow_redirects=False,
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    wait_for_stage(client, job_id, {"audio_ready", "failed"})
+
+    response = client.post(f"/jobs/{job_id}/transcribe", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert wait_for_stage(client, job_id, {"done", "failed"}) == "done"
+    assert get_job(client.app.state.conn, job_id)["mode"] == "full"
+
+
+def test_transcribe_rejects_job_not_in_audio_ready(client):
+    conn = client.app.state.conn
+    job_id = create_job(conn, title="t", source="s", source_type="file")
+
+    response = client.post(f"/jobs/{job_id}/transcribe")
+
+    assert response.status_code == 400
+
+
+def test_transcribe_404_for_unknown_job(client):
+    response = client.post("/jobs/nonexistent/transcribe")
+
+    assert response.status_code == 404
+
+
+def test_delete_audio_removes_file(client, tmp_path):
+    video = tmp_path / "weekly.mp4"
+    video.write_bytes(b"video")
+    created = client.post(
+        "/jobs",
+        data={"source": str(video), "title": "삭제", "mode": "audio_only"},
+        follow_redirects=False,
+    )
+    job_id = created.headers["location"].rsplit("/", 1)[-1]
+    wait_for_stage(client, job_id, {"audio_ready", "failed"})
+
+    response = client.post(f"/jobs/{job_id}/audio/delete", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert client.get(f"/jobs/{job_id}/audio").status_code == 404
 
 
 def test_inbox_files_are_picked_up(tmp_path, monkeypatch):

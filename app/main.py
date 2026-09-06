@@ -5,13 +5,13 @@ import json
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from app.config import load_config
 from app.credentials import make_asr_client
-from app.db import connect, create_job, get_job, init_db, list_jobs
-from app.renderer import format_timestamp
+from app.db import connect, create_job, get_job, init_db, list_jobs, update_job
+from app.renderer import audio_filename, format_timestamp
 from app.worker import Worker
 
 TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
@@ -72,6 +72,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
         title: str = Form(...),
         keywords: str = Form(""),
         spk_count: str = Form(""),
+        mode: str = Form("full"),
     ):
         source = source.strip()
         if not source:
@@ -91,6 +92,7 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
             source_type="url" if is_url else "file",
             keywords=[k.strip() for k in keywords.split(",") if k.strip()],
             spk_count=int(spk_count) if spk_count.strip().isdigit() else None,
+            mode="audio_only" if mode == "audio_only" else "full",
         )
         _schedule(app, job_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
@@ -143,6 +145,45 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
             if key.startswith("speaker_") and str(value).strip()
         }
         await asyncio.to_thread(worker.regenerate, job_id, speaker_map=speaker_map)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @app.get("/jobs/{job_id}/audio")
+    async def download_audio(job_id: str):
+        job = get_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+        audio_path = Path(job["audio_path"]) if job["audio_path"] else None
+        if audio_path is None or not audio_path.exists():
+            raise HTTPException(status_code=404, detail="추출된 오디오 파일이 없습니다.")
+
+        return FileResponse(
+            audio_path,
+            media_type="audio/mp4",
+            filename=audio_filename(job["created_at"], job["title"]),
+        )
+
+    @app.post("/jobs/{job_id}/audio/delete")
+    async def remove_audio(job_id: str):
+        job = get_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+        await asyncio.to_thread(worker.delete_audio, job_id)
+        return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @app.post("/jobs/{job_id}/transcribe")
+    async def transcribe(job_id: str):
+        job = get_job(conn, job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+        if job["stage"] != "audio_ready":
+            raise HTTPException(
+                status_code=400, detail="오디오 추출이 끝난 작업에서만 이어서 진행할 수 있습니다."
+            )
+
+        update_job(conn, job_id, mode="full")
+        _schedule(app, job_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 
     @app.post("/jobs/{job_id}/retry")

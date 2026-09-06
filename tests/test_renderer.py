@@ -38,6 +38,12 @@ def test_render_applies_speaker_map():
     assert "화자 1" not in markdown
 
 
+def test_audio_filename_matches_transcript_naming():
+    from app.renderer import audio_filename
+
+    assert audio_filename("2026-09-03T14:22:00+09:00", "주간회의") == "2026-09-03-주간회의.m4a"
+
+
 def test_render_writes_frontmatter_and_warning():
     markdown = render_markdown(meta=META, raw=FIXTURE, speaker_map={"0": "김팀장"})
     header = markdown.split("---")[1]

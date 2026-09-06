@@ -28,6 +28,11 @@ def transcript_filename(date_iso: str, title: str) -> str:
     return f"{date_part}-{safe_title or 'untitled'}.md"
 
 
+def audio_filename(date_iso: str, title: str) -> str:
+    """추출된 오디오를 내려받을 때 쓸 이름. 전사본과 같은 규칙을 따른다."""
+    return transcript_filename(date_iso, title).removesuffix(".md") + ".m4a"
+
+
 def _yaml_str(value: str) -> str:
     """콜론·따옴표·개행이 있어도 안전하도록 YAML 큰따옴표 스칼라로 감싼다."""
     escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
