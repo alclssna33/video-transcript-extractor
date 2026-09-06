@@ -1,6 +1,7 @@
 """SQLite 접근 계층. SQL은 이 모듈 밖으로 새어나가지 않는다."""
 import json
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,11 @@ STAGES = (
 
 # mode: 처리 범위. audio_only는 오디오 추출까지만 하고 멈춘다.
 MODES = ("audio_only", "full")
+
+# 하나의 커넥션을 이벤트 루프 스레드와 워커 스레드가 공유한다(check_same_thread=False).
+# sqlite3는 그런 동시 사용을 보장하지 않으므로 모든 접근을 이 락으로 직렬화한다.
+# 1인용 로컬 도구라 커넥션 풀 대신 단일 락으로 충분하다.
+_LOCK = threading.RLock()
 
 UPDATABLE_COLUMNS = frozenset({
     "title", "stage", "audio_path", "rtzr_transcribe_id", "submitted_at",
@@ -68,9 +74,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA)
-    _migrate(conn)
-    conn.commit()
+    with _LOCK:
+        conn.executescript(SCHEMA)
+        _migrate(conn)
+        conn.commit()
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -94,39 +101,43 @@ def create_job(
         raise ValueError(f"알 수 없는 mode입니다: {mode!r}")
     job_id = uuid.uuid4().hex[:12]
     timestamp = now_iso()
-    conn.execute(
-        """
-        INSERT INTO jobs (id, title, source, source_type, stage, mode, keywords,
-                          spk_count, attempts, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?)
-        """,
-        (
-            job_id, title, source, source_type, mode,
-            json.dumps(keywords or [], ensure_ascii=False),
-            spk_count, timestamp, timestamp,
-        ),
-    )
-    conn.commit()
+    with _LOCK:
+        conn.execute(
+            """
+            INSERT INTO jobs (id, title, source, source_type, stage, mode, keywords,
+                              spk_count, attempts, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, 0, ?, ?)
+            """,
+            (
+                job_id, title, source, source_type, mode,
+                json.dumps(keywords or [], ensure_ascii=False),
+                spk_count, timestamp, timestamp,
+            ),
+        )
+        conn.commit()
     return job_id
 
 
 def get_job(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row | None:
-    cursor = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
-    return cursor.fetchone()
+    with _LOCK:
+        cursor = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,))
+        return cursor.fetchone()
 
 
 def list_jobs(conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    cursor = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC")
-    return cursor.fetchall()
+    with _LOCK:
+        cursor = conn.execute("SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC")
+        return cursor.fetchall()
 
 
 def list_jobs_by_stage(conn: sqlite3.Connection, stages: tuple[str, ...]) -> list[sqlite3.Row]:
     placeholders = ",".join("?" for _ in stages)
-    cursor = conn.execute(
-        f"SELECT * FROM jobs WHERE stage IN ({placeholders}) ORDER BY created_at",
-        stages,
-    )
-    return cursor.fetchall()
+    with _LOCK:
+        cursor = conn.execute(
+            f"SELECT * FROM jobs WHERE stage IN ({placeholders}) ORDER BY created_at",
+            stages,
+        )
+        return cursor.fetchall()
 
 
 def update_job(conn: sqlite3.Connection, job_id: str, **fields) -> None:
@@ -141,17 +152,19 @@ def update_job(conn: sqlite3.Connection, job_id: str, **fields) -> None:
         return
 
     assignments = ", ".join(f"{column} = ?" for column in fields)
-    conn.execute(
-        f"UPDATE jobs SET {assignments}, updated_at = ? WHERE id = ?",
-        (*fields.values(), now_iso(), job_id),
-    )
-    conn.commit()
+    with _LOCK:
+        conn.execute(
+            f"UPDATE jobs SET {assignments}, updated_at = ? WHERE id = ?",
+            (*fields.values(), now_iso(), job_id),
+        )
+        conn.commit()
 
 
 def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
-    cursor = conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = cursor.fetchone()
-    return row["value"] if row else None
+    with _LOCK:
+        cursor = conn.execute("SELECT value FROM settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        return row["value"] if row else None
 
 
 def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
@@ -160,12 +173,13 @@ def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
     이렇게 해야 설정을 비웠을 때 .env 폴백으로 되돌아갈 수 있다.
     """
     cleaned = value.strip()
-    if cleaned:
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, cleaned),
-        )
-    else:
-        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
-    conn.commit()
+    with _LOCK:
+        if cleaned:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, cleaned),
+            )
+        else:
+            conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        conn.commit()

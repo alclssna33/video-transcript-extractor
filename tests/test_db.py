@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 
@@ -230,3 +231,45 @@ def test_update_job_rejects_unknown_mode_and_stage(tmp_path):
 
     with pytest.raises(ValueError):
         update_job(conn, job_id, stage="nowhere")
+
+
+def test_connection_is_safe_under_concurrent_thread_access(tmp_path):
+    """이벤트 루프 스레드와 워커 스레드가 커넥션을 공유하므로 동시 접근이 안전해야 한다."""
+    conn = connect(tmp_path / "jobs.db")
+    init_db(conn)
+    job_ids = [
+        create_job(conn, title=f"job{i}", source="s", source_type="file")
+        for i in range(5)
+    ]
+
+    errors = []
+    stop = threading.Event()
+
+    def reader():
+        try:
+            while not stop.is_set():
+                for job_id in job_ids:
+                    if get_job(conn, job_id) is None:
+                        errors.append(f"job이 사라짐: {job_id}")
+                list_jobs(conn)
+        except Exception as exc:  # noqa: BLE001 - 어떤 예외든 실패로 기록한다
+            errors.append(f"{type(exc).__name__}: {exc}")
+
+    def writer():
+        try:
+            for _ in range(200):
+                for job_id in job_ids:
+                    update_job(conn, job_id, last_error="진행 중")
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{type(exc).__name__}: {exc}")
+        finally:
+            stop.set()
+
+    threads = [threading.Thread(target=reader) for _ in range(3)]
+    threads.append(threading.Thread(target=writer))
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert errors == [], f"동시 접근에서 오류가 발생했다: {errors[:5]}"
