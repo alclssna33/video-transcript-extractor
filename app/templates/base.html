@@ -5,28 +5,315 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}영상 대본 추출기{% endblock %}</title>
   <style>
-    body { font-family: system-ui, "Malgun Gothic", sans-serif; max-width: 860px;
-           margin: 2rem auto; padding: 0 1rem; line-height: 1.6; color: #1a1a1a; }
-    a { color: #0b62d0; }
-    form { display: grid; gap: .75rem; margin-bottom: 2rem; }
-    label { font-weight: 600; font-size: .9rem; }
-    input, button { padding: .5rem; font-size: 1rem; font-family: inherit; }
-    button { cursor: pointer; background: #0b62d0; color: #fff; border: 0; border-radius: 4px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { text-align: left; padding: .5rem; border-bottom: 1px solid #e5e5e5; }
-    .badge { padding: .1rem .5rem; border-radius: 999px; font-size: .8rem; }
-    .stage-done { background: #dcf5e3; }
-    .stage-failed, .stage-stalled { background: #ffe0e0; }
-    .stage-pending, .stage-extracted, .stage-submitted, .stage-fetched { background: #fff3cd; }
-    .hint { color: #666; font-size: .85rem; }
-    .warn { background: #fff8e1; padding: .75rem; border-left: 3px solid #f0b400; }
-    .utterance { margin: .4rem 0; }
-    .speaker { font-weight: 700; }
-    .time { color: #888; font-size: .85rem; margin-left: .3rem; }
+    /* ── 디자인 토큰 ─────────────────────────────────────────────── */
+    :root {
+      --bg: #ffffff;
+      --surface: #f7f8f9;
+      --fg: #111417;
+      --fg-muted: #5b6570;
+      --border: #e3e6e9;
+      --accent: #1f6feb;
+      --accent-hover: #1a5fd0;
+      --accent-fg: #ffffff;
+      --ok-bg: #e7f5ec;     --ok-fg: #14532d;
+      --warn-bg: #fdf3d8;   --warn-fg: #6b4e00;
+      --danger-bg: #fdecea; --danger-fg: #8c1d13;
+
+      --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+      --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px;
+
+      --radius: 6px;
+      /* 한글 글리프가 필요하고 오프라인에서도 동작해야 하므로 시스템 폰트를 쓴다. */
+      --font-sans: Pretendard, -apple-system, "Apple SD Gothic Neo",
+                   "Malgun Gothic", system-ui, sans-serif;
+      --font-mono: ui-monospace, "Cascadia Mono", Consolas, "D2Coding", monospace;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #14171a;
+        --surface: #1c2024;
+        --fg: #e9edf1;
+        --fg-muted: #9aa5b1;
+        --border: #2c3238;
+        --accent: #4d92f8;
+        --accent-hover: #6ba4fa;
+        --accent-fg: #0b1015;
+        --ok-bg: #14301f;     --ok-fg: #7fd3a1;
+        --warn-bg: #33280c;   --warn-fg: #e2be6a;
+        --danger-bg: #3a1714; --danger-fg: #f0a29b;
+      }
+    }
+
+    /* ── 기본 ────────────────────────────────────────────────────── */
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--font-sans);
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    a { color: var(--accent); }
+    a:hover { color: var(--accent-hover); }
+
+    code, .mono { font-family: var(--font-mono); font-size: .875em; }
+
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ── 레이아웃 ─────────────────────────────────────────────────── */
+    .site-header { border-bottom: 1px solid var(--border); background: var(--bg); }
+
+    .site-header__inner {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: var(--space-4);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--space-4);
+    }
+
+    .site-title { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+    .site-title a { color: inherit; text-decoration: none; }
+
+    .nav-link {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-3);
+      border-radius: var(--radius);
+      color: var(--fg-muted);
+      text-decoration: none;
+      font-size: .875rem;
+      transition: background-color 160ms ease, color 160ms ease;
+    }
+    .nav-link:hover { background: var(--surface); color: var(--fg); }
+    .nav-link svg { width: 16px; height: 16px; }
+
+    main {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: var(--space-8) var(--space-4) var(--space-10);
+    }
+
+    h2 { font-size: 1.125rem; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 var(--space-4); }
+    h3 { font-size: .9375rem; font-weight: 600; margin: var(--space-6) 0 var(--space-3); }
+
+    /* ── 컴포넌트 ─────────────────────────────────────────────────── */
+    .card {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: var(--space-5);
+      margin-bottom: var(--space-8);
+    }
+
+    .field { margin-bottom: var(--space-4); }
+    .field:last-of-type { margin-bottom: 0; }
+
+    label { display: block; font-size: .8125rem; font-weight: 600; margin-bottom: var(--space-2); }
+
+    input[type="text"], input[type="password"], input[type="number"], input:not([type]) {
+      width: 100%;
+      padding: var(--space-2) var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--fg);
+      font-family: inherit;
+      font-size: .9375rem;
+      transition: border-color 160ms ease;
+    }
+    input:hover { border-color: var(--fg-muted); }
+    input:focus { border-color: var(--accent); }
+
+    .hint { color: var(--fg-muted); font-size: .8125rem; margin-top: var(--space-2); }
+
+    button, .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-2);
+      padding: var(--space-3) var(--space-5);
+      min-height: 44px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--fg);
+      font-family: inherit;
+      font-size: .9375rem;
+      font-weight: 500;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background-color 160ms ease, border-color 160ms ease;
+    }
+    button:hover, .btn:hover { background: var(--surface); }
+    button:disabled { opacity: .6; cursor: default; }
+
+    button[type="submit"], .btn--primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-fg);
+    }
+    button[type="submit"]:hover, .btn--primary:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .btn-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-6); }
+    .btn-row form { margin: 0; }
+
+    /* 라디오 선택 카드 */
+    .choice-group { display: grid; gap: var(--space-2); }
+    .choice {
+      display: flex;
+      gap: var(--space-3);
+      padding: var(--space-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      font-weight: 400;
+      transition: border-color 160ms ease, background-color 160ms ease;
+    }
+    .choice:hover { background: var(--surface); }
+    .choice:has(input:checked) { border-color: var(--accent); }
+    .choice input { width: auto; margin-top: 3px; }
+    .choice__label { font-weight: 600; font-size: .875rem; display: block; }
+    .choice__desc { color: var(--fg-muted); font-size: .8125rem; }
+
+    /* 상태 뱃지 */
+    .badge {
+      display: inline-block;
+      padding: 2px var(--space-2);
+      border-radius: 999px;
+      font-size: .75rem;
+      font-weight: 500;
+      white-space: nowrap;
+      background: var(--surface);
+      color: var(--fg-muted);
+    }
+    .badge--ok     { background: var(--ok-bg);     color: var(--ok-fg); }
+    .badge--warn   { background: var(--warn-bg);   color: var(--warn-fg); }
+    .badge--danger { background: var(--danger-bg); color: var(--danger-fg); }
+
+    /* Task 8 전까지 기존 페이지가 깨지지 않도록 남겨두는 예전 클래스 */
+    .stage-done, .stage-audio_ready { background: var(--ok-bg); color: var(--ok-fg); }
+    .stage-failed, .stage-stalled { background: var(--danger-bg); color: var(--danger-fg); }
+    .stage-pending, .stage-extracted, .stage-submitted, .stage-fetched {
+      background: var(--warn-bg); color: var(--warn-fg);
+    }
+
+    /* 테이블 */
+    table { border-collapse: collapse; width: 100%; font-size: .9375rem; }
+    th {
+      text-align: left;
+      font-size: .75rem;
+      font-weight: 600;
+      color: var(--fg-muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      padding: var(--space-2) var(--space-3);
+      border-bottom: 1px solid var(--border);
+    }
+    td { padding: var(--space-3); border-bottom: 1px solid var(--border); }
+    tbody tr { transition: background-color 160ms ease; }
+    tbody tr:hover { background: var(--surface); }
+
+    /* 안내 박스 */
+    .banner, .warn {
+      padding: var(--space-3) var(--space-4);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--surface);
+      font-size: .875rem;
+      margin-bottom: var(--space-6);
+    }
+    .warn, .banner--warn {
+      background: var(--warn-bg);
+      border-color: transparent;
+      color: var(--warn-fg);
+    }
+    .banner--danger { background: var(--danger-bg); border-color: transparent; color: var(--danger-fg); }
+    pre.banner, pre.warn {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: var(--font-mono);
+    }
+
+    /* 빈 상태 */
+    .empty {
+      border: 1px dashed var(--border);
+      border-radius: var(--radius);
+      padding: var(--space-8) var(--space-4);
+      text-align: center;
+      color: var(--fg-muted);
+      font-size: .875rem;
+    }
+
+    /* 전사 내용 */
+    .utterance {
+      border-left: 3px solid var(--border);
+      padding: var(--space-1) 0 var(--space-1) var(--space-4);
+      margin: 0 0 var(--space-4);
+    }
+    .utterance[data-spk="0"] { border-left-color: #1f6feb; }
+    .utterance[data-spk="1"] { border-left-color: #b45309; }
+    .utterance[data-spk="2"] { border-left-color: #15803d; }
+    .utterance[data-spk="3"] { border-left-color: #7e22ce; }
+    .utterance[data-spk="4"] { border-left-color: #be123c; }
+
+    .utterance__meta {
+      display: flex;
+      align-items: baseline;
+      gap: var(--space-2);
+      margin-bottom: var(--space-1);
+    }
+    .utterance__speaker, .speaker { font-weight: 600; font-size: .8125rem; }
+    .utterance__time, .time {
+      font-family: var(--font-mono);
+      font-size: .75rem;
+      color: var(--fg-muted);
+    }
+
+    .meta-list {
+      list-style: none;
+      margin: 0 0 var(--space-6);
+      padding: 0;
+      font-size: .875rem;
+      color: var(--fg-muted);
+    }
+    .meta-list li { margin-bottom: var(--space-1); }
+    .meta-list .mono { word-break: break-all; }
+
+    @media (max-width: 480px) {
+      main { padding: var(--space-5) var(--space-3) var(--space-8); }
+      .card { padding: var(--space-4); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; animation: none !important; }
+    }
   </style>
 </head>
 <body>
-  <h1><a href="/" style="text-decoration:none;color:inherit">영상 대본 추출기</a></h1>
-  {% block content %}{% endblock %}
+  <header class="site-header">
+    <div class="site-header__inner">
+      <h1 class="site-title"><a href="/">영상 대본 추출기</a></h1>
+      <a class="nav-link" href="/settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        설정
+      </a>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
 </body>
 </html>
