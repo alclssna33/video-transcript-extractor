@@ -9,8 +9,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 
 from app.config import load_config
-from app.credentials import make_asr_client
-from app.db import MODES, connect, create_job, get_job, init_db, list_jobs, update_job
+from app.credentials import (
+    CLIENT_ID_KEY,
+    CLIENT_SECRET_KEY,
+    make_asr_client,
+    mask_secret,
+    resolve_credentials,
+)
+from app.db import MODES, connect, create_job, get_job, init_db, list_jobs, set_setting, update_job
 from app.renderer import audio_filename, format_timestamp
 from app.worker import Worker
 
@@ -62,7 +68,12 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         return TEMPLATES.TemplateResponse(
-            request, "index.html", {"jobs": list_jobs(conn)}
+            request,
+            "index.html",
+            {
+                "jobs": list_jobs(conn),
+                "has_credentials": resolve_credentials(conn, config) is not None,
+            },
         )
 
     @app.post("/jobs")
@@ -189,6 +200,36 @@ def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
         update_job(conn, job_id, mode="full")
         _schedule(app, job_id)
         return RedirectResponse(f"/jobs/{job_id}", status_code=303)
+
+    @app.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request):
+        credentials = resolve_credentials(conn, config)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "settings.html",
+            {
+                "credentials": credentials,
+                "masked_secret": (
+                    mask_secret(credentials.client_secret) if credentials else None
+                ),
+            },
+        )
+
+    @app.post("/settings")
+    async def save_settings(
+        client_id: str = Form(""),
+        client_secret: str = Form(""),
+    ):
+        client_id = client_id.strip()
+        client_secret = client_secret.strip()
+        if not client_id or not client_secret:
+            raise HTTPException(
+                status_code=400, detail="client_id와 client_secret을 모두 입력하세요."
+            )
+
+        set_setting(conn, CLIENT_ID_KEY, client_id)
+        set_setting(conn, CLIENT_SECRET_KEY, client_secret)
+        return RedirectResponse("/settings", status_code=303)
 
     @app.post("/jobs/{job_id}/retry")
     async def retry(job_id: str):

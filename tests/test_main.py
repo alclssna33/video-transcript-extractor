@@ -6,7 +6,8 @@ from urllib.parse import quote
 import pytest
 from fastapi.testclient import TestClient
 
-from app.db import create_job, get_job, list_jobs
+from app.credentials import CLIENT_ID_KEY, CLIENT_SECRET_KEY
+from app.db import create_job, get_job, get_setting, list_jobs
 from app.main import create_app
 from app.renderer import audio_filename
 
@@ -370,6 +371,81 @@ def test_delete_audio_clears_audio_path(client, tmp_path):
     client.post(f"/jobs/{job_id}/audio/delete", follow_redirects=False)
 
     assert get_job(client.app.state.conn, job_id)["audio_path"] is None
+
+
+def test_settings_page_shows_unset_state(client):
+    response = client.get("/settings")
+
+    assert response.status_code == 200
+    assert "설정" in response.text
+
+
+def test_saving_settings_persists_credentials(client):
+    response = client.post(
+        "/settings",
+        data={"client_id": "saved-id", "client_secret": "saved-secret-1234"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    conn = client.app.state.conn
+    assert get_setting(conn, CLIENT_ID_KEY) == "saved-id"
+    assert get_setting(conn, CLIENT_SECRET_KEY) == "saved-secret-1234"
+
+
+def test_settings_page_masks_saved_secret(client):
+    client.post(
+        "/settings",
+        data={"client_id": "saved-id", "client_secret": "saved-secret-1234"},
+        follow_redirects=False,
+    )
+
+    response = client.get("/settings")
+
+    assert "1234" in response.text                     # 끝 4자리는 확인용으로 노출
+    assert "saved-secret-1234" not in response.text    # 원문은 절대 노출 금지
+
+
+def test_settings_rejects_partial_input(client):
+    response = client.post(
+        "/settings", data={"client_id": "only-id", "client_secret": ""}
+    )
+
+    assert response.status_code == 400
+
+
+def test_saved_settings_win_over_env(client):
+    """설정 화면 값이 .env보다 우선해야 한다."""
+    client.post(
+        "/settings",
+        data={"client_id": "db-id", "client_secret": "db-secret-9999"},
+        follow_redirects=False,
+    )
+
+    response = client.get("/settings")
+
+    assert "9999" in response.text
+    assert "설정 화면" in response.text  # 출처 표시
+
+
+def test_index_warns_when_credentials_missing(tmp_path, monkeypatch):
+    """자격 증명이 없으면 메인 화면이 안내해야 한다 — 오디오 추출은 여전히 가능하다."""
+    monkeypatch.delenv("RTZR_CLIENT_ID", raising=False)
+    monkeypatch.delenv("RTZR_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    # 개발 환경의 실제 .env가 있어도 이 테스트는 "자격 증명 없음"을 재현해야 한다.
+    monkeypatch.setattr("app.config.load_dotenv", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "app.worker.extract_audio", lambda source, dest: (Path(dest).write_bytes(b"a"), Path(dest))[1]
+    )
+    monkeypatch.setattr("app.worker.probe_duration", lambda path: 60.0)
+
+    app = create_app(poll_interval=0)   # asr 주입 없음 — 진짜 팩토리를 쓴다
+    with TestClient(app) as unconfigured:
+        response = unconfigured.get("/")
+
+    assert response.status_code == 200
+    assert "설정" in response.text
 
 
 def test_inbox_files_are_picked_up(tmp_path, monkeypatch):

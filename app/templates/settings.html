@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>설정</h2>
+<form method="post" action="/settings">
+  <div>
+    <label for="client_id">RTZR client_id</label><br>
+    <input id="client_id" name="client_id" style="width:100%"
+           value="{{ credentials.client_id if credentials else '' }}" required>
+  </div>
+  <div>
+    <label for="client_secret">RTZR client_secret</label><br>
+    <input id="client_secret" name="client_secret" type="password" style="width:100%" required>
+    {% if masked_secret %}
+    <div class="hint">
+      현재 저장됨: {{ masked_secret }}
+      (출처: {{ '설정 화면' if credentials.source == 'db' else '.env 파일' }})
+    </div>
+    {% else %}
+    <div class="hint">아직 설정되지 않았습니다.</div>
+    {% endif %}
+  </div>
+  <button type="submit">저장</button>
+</form>
+{% endblock %}
