@@ -90,6 +90,8 @@ def create_job(
     spk_count: int | None = None,
     mode: str = "full",
 ) -> str:
+    if mode not in MODES:
+        raise ValueError(f"알 수 없는 mode입니다: {mode!r}")
     job_id = uuid.uuid4().hex[:12]
     timestamp = now_iso()
     conn.execute(
@@ -131,6 +133,10 @@ def update_job(conn: sqlite3.Connection, job_id: str, **fields) -> None:
     unknown = set(fields) - UPDATABLE_COLUMNS
     if unknown:
         raise ValueError(f"수정할 수 없는 컬럼입니다: {sorted(unknown)}")
+    if "mode" in fields and fields["mode"] not in MODES:
+        raise ValueError(f"알 수 없는 mode입니다: {fields['mode']!r}")
+    if "stage" in fields and fields["stage"] not in STAGES:
+        raise ValueError(f"알 수 없는 stage입니다: {fields['stage']!r}")
     if not fields:
         return
 
@@ -149,9 +155,17 @@ def get_setting(conn: sqlite3.Connection, key: str) -> str | None:
 
 
 def set_setting(conn: sqlite3.Connection, key: str, value: str) -> None:
-    conn.execute(
-        "INSERT INTO settings (key, value) VALUES (?, ?) "
-        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        (key, value),
-    )
+    """빈 값은 '설정 없음'과 같으므로 저장하지 않고 지운다.
+
+    이렇게 해야 설정을 비웠을 때 .env 폴백으로 되돌아갈 수 있다.
+    """
+    cleaned = value.strip()
+    if cleaned:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, cleaned),
+        )
+    else:
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
     conn.commit()
