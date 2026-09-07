@@ -1,42 +1,64 @@
 @echo off
-chcp 65001 >nul
 setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 echo ========================================
-echo   ì˜ìƒ ëŒ€ë³¸ ì¶”ì¶œê¸°
+echo   ¿µ»ó ´ëº» ÃßÃâ±â
 echo ========================================
 echo.
 
-REM â”€â”€ Python ì„¤ì¹˜ í™•ì¸ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-where python >nul 2>&1
-if errorlevel 1 (
-    echo [ì˜¤ë¥˜] Pythonì´ ì„¤ì¹˜ë˜ì–´ ìžˆì§€ ì•ŠìŠµë‹ˆë‹¤.
+set "PY="
+
+REM Prefer the official py launcher - avoids the Microsoft Store "python.exe" stub
+where py >nul 2>&1
+if not errorlevel 1 (
+    py -3 -c "import sys" >nul 2>&1
+    if not errorlevel 1 (
+        set "PY=py -3"
+    )
+)
+
+REM Fall back to "python" only if it is a real interpreter, not the Store stub
+if not defined PY (
+    where python >nul 2>&1
+    if not errorlevel 1 (
+        python -c "import sys" >nul 2>&1
+        if not errorlevel 1 (
+            set "PY=python"
+        )
+    )
+)
+
+if not defined PY (
+    echo [¿À·ù] PythonÀ» Ã£À» ¼ö ¾ø½À´Ï´Ù.
     echo.
-    echo   1^) https://www.python.org/downloads/ ì—ì„œ Python 3.10 ì´ìƒì„ ì„¤ì¹˜í•˜ì„¸ìš”.
-    echo   2^) ì„¤ì¹˜ í™”ë©´ì—ì„œ "Add python.exe to PATH"ë¥¼ ê¼­ ì²´í¬í•˜ì„¸ìš”.
-    echo   3^) ì„¤ì¹˜ê°€ ëë‚˜ë©´ ì´ íŒŒì¼ì„ ë‹¤ì‹œ ì‹¤í–‰í•˜ì„¸ìš”.
+    echo   1^) https://www.python.org/downloads/ ¿¡¼­ Python 3.10 ÀÌ»óÀ» ¼³Ä¡ÇÏ¼¼¿ä.
+    echo   2^) ¼³Ä¡ È­¸é¿¡¼­ "Add python.exe to PATH"¸¦ ²À Ã¼Å©ÇÏ¼¼¿ä.
+    echo   3^) ¼³Ä¡°¡ ³¡³ª¸é ÀÌ ÆÄÀÏÀ» ´Ù½Ã ½ÇÇàÇÏ¼¼¿ä.
+    echo.
+    echo   ÀÌ¹Ì PythonÀ» ¼³Ä¡Çß´Âµ¥µµ ÀÌ ¸Þ½ÃÁö°¡ º¸ÀÎ´Ù¸é, ¼³Á¤ -^> ¾Û -^> °í±Þ ¾Û ¼³Á¤
+    echo   -^> ¾Û ½ÇÇà º°Äª ¿¡¼­ "python.exe"·Î ½ÃÀÛÇÏ´Â Ç×¸ñÀ» ²¨ÁÖ¼¼¿ä.
     echo.
     pause
     exit /b 1
 )
 
-REM â”€â”€ ffmpeg ì„¤ì¹˜ í™•ì¸ (ì—†ì–´ë„ ì‹¤í–‰ì€ ê³„ì†í•˜ë˜ ê²½ê³ ) â”€â”€â”€â”€â”€â”€
+REM Check ffmpeg is installed - warn only, keep going
 where ffmpeg >nul 2>&1
 if errorlevel 1 (
-    echo [ê²½ê³ ] ffmpegê°€ ì„¤ì¹˜ë˜ì–´ ìžˆì§€ ì•ŠìŠµë‹ˆë‹¤. ì˜ìƒ ì²˜ë¦¬ì— ë°˜ë“œì‹œ í•„ìš”í•©ë‹ˆë‹¤.
-    echo         https://www.gyan.dev/ffmpeg/builds/ ì—ì„œ "release essentials"ë¥¼
-    echo         ë‚´ë ¤ë°›ì•„ ì••ì¶•ì„ í’€ê³ , bin í´ë”ë¥¼ PATHì— ì¶”ê°€í•´ì£¼ì„¸ìš”.
+    echo [°æ°í] ffmpeg°¡ ¼³Ä¡µÇ¾î ÀÖÁö ¾Ê½À´Ï´Ù. ¿µ»ó Ã³¸®¿¡ ¹Ýµå½Ã ÇÊ¿äÇÕ´Ï´Ù.
+    echo         https://www.gyan.dev/ffmpeg/builds/ ¿¡¼­ release essentials¸¦ ³»·Á¹Þ¾Æ
+    echo         ¾ÐÃàÀ» Ç®°í, bin Æú´õ¸¦ PATH¿¡ Ãß°¡ÇØÁÖ¼¼¿ä.
     echo.
 )
 
-REM â”€â”€ ìµœì´ˆ ì‹¤í–‰ì´ë©´ ê°€ìƒí™˜ê²½ ìƒì„± + íŒ¨í‚¤ì§€ ì„¤ì¹˜ â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+REM First run - create venv and install packages
 if not exist ".venv\Scripts\python.exe" (
-    echo ì²˜ìŒ ì‹¤í–‰ì´ë¼ í•„ìš”í•œ í”„ë¡œê·¸ëž¨ì„ ì„¤ì¹˜í•©ë‹ˆë‹¤. ëª‡ ë¶„ ê±¸ë¦´ ìˆ˜ ìžˆì–´ìš”...
+    echo Ã³À½ ½ÇÇàÀÌ¶ó ÇÊ¿äÇÑ ÇÁ·Î±×·¥À» ¼³Ä¡ÇÕ´Ï´Ù. ¸î ºÐ °É¸± ¼ö ÀÖ¾î¿ä...
     echo.
-    python -m venv .venv
+    %PY% -m venv .venv
     if errorlevel 1 (
-        echo [ì˜¤ë¥˜] ê°€ìƒí™˜ê²½ ìƒì„±ì— ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤.
+        echo [¿À·ù] °¡»óÈ¯°æ »ý¼º¿¡ ½ÇÆÐÇß½À´Ï´Ù.
         pause
         exit /b 1
     )
@@ -44,22 +66,22 @@ if not exist ".venv\Scripts\python.exe" (
     ".venv\Scripts\python.exe" -m pip install --upgrade pip >nul
     ".venv\Scripts\python.exe" -m pip install -r requirements.txt
     if errorlevel 1 (
-        echo [ì˜¤ë¥˜] íŒ¨í‚¤ì§€ ì„¤ì¹˜ì— ì‹¤íŒ¨í–ˆìŠµë‹ˆë‹¤. ì¸í„°ë„· ì—°ê²°ì„ í™•ì¸í•´ì£¼ì„¸ìš”.
+        echo [¿À·ù] ÆÐÅ°Áö ¼³Ä¡¿¡ ½ÇÆÐÇß½À´Ï´Ù. ÀÎÅÍ³Ý ¿¬°áÀ» È®ÀÎÇØÁÖ¼¼¿ä.
         pause
         exit /b 1
     )
     echo.
-    echo ì„¤ì¹˜ê°€ ëë‚¬ìŠµë‹ˆë‹¤.
+    echo ¼³Ä¡°¡ ³¡³µ½À´Ï´Ù.
     echo.
 )
 
-REM â”€â”€ .env ì—†ìœ¼ë©´ ë¹ˆ ì˜ˆì‹œë¡œ ë§Œë“¤ì–´ë‘”ë‹¤ (ìžê²© ì¦ëª…ì€ ì„¤ì • í™”ë©´ì—ì„œ ìž…ë ¥) â”€â”€
+REM Create .env from example if missing - credentials are entered via settings screen
 if not exist ".env" (
     copy ".env.example" ".env" >nul
 )
 
-echo ìž ì‹œ í›„ ë¸Œë¼ìš°ì €ê°€ ìžë™ìœ¼ë¡œ ì—´ë¦½ë‹ˆë‹¤: http://localhost:8000
-echo í”„ë¡œê·¸ëž¨ì„ ë„ë ¤ë©´ ì´ ê²€ì€ ì°½ì„ ë‹«ìœ¼ë©´ ë©ë‹ˆë‹¤.
+echo Àá½Ã ÈÄ ºê¶ó¿ìÀú°¡ ÀÚµ¿À¸·Î ¿­¸³´Ï´Ù: http://localhost:8000
+echo ÇÁ·Î±×·¥À» ²ô·Á¸é ÀÌ °ËÀº Ã¢À» ´ÝÀ¸¸é µË´Ï´Ù.
 echo.
 
 start "" cmd /c "timeout /t 2 /nobreak >nul & start "" http://localhost:8000"
