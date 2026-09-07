@@ -6,3 +6,4 @@ inbox/
 *.db
 __pycache__/
 .venv/
+docs/superpowers/
