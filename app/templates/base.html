@@ -77,8 +77,17 @@
       gap: var(--space-4);
     }
 
-    .site-title { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
-    .site-title a { color: inherit; text-decoration: none; }
+    .site-title {
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin: 0;
+      display: flex;
+      align-items: center;
+      gap: var(--space-2);
+    }
+    .site-title a { display: flex; align-items: center; gap: var(--space-2); color: inherit; text-decoration: none; }
+    .site-title img { width: 28px; height: 28px; border-radius: 6px; display: block; }
 
     .nav-link {
       display: inline-flex;
@@ -281,6 +290,22 @@
     .meta-list li { margin-bottom: var(--space-1); }
     .meta-list .mono { word-break: break-all; }
 
+    /* 푸터 */
+    .site-footer { border-top: 1px solid var(--border); }
+    .site-footer__inner {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: var(--space-6) var(--space-4);
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+    }
+    .site-footer a { display: flex; align-items: center; gap: var(--space-3); color: inherit; text-decoration: none; }
+    .site-footer a:hover .site-footer__text { color: var(--accent); }
+    .site-footer img { width: 40px; height: 40px; border-radius: 8px; display: block; }
+    .site-footer__text { color: var(--fg-muted); font-size: .8125rem; line-height: 1.4; transition: color 160ms ease; }
+    .site-footer__text strong { color: var(--fg); font-weight: 600; }
+
     @media (max-width: 480px) {
       main { padding: var(--space-5) var(--space-3) var(--space-8); }
       .card { padding: var(--space-4); }
@@ -294,7 +319,12 @@
 <body>
   <header class="site-header">
     <div class="site-header__inner">
-      <h1 class="site-title"><a href="/">영상 대본 추출기</a></h1>
+      <h1 class="site-title">
+        <a href="/">
+          <img src="/static/logo.jpg" alt="개원 비밀공간 로고">
+          영상 대본 추출기
+        </a>
+      </h1>
       <a class="nav-link" href="/settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
              stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -308,5 +338,16 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <a href="https://drtemplar.co.kr" target="_blank" rel="noopener">
+        <img src="/static/logo.jpg" alt="개원 비밀공간 로고">
+        <span class="site-footer__text">
+          <strong>개원 비밀공간</strong>에서 제작<br>
+          drtemplar.co.kr
+        </span>
+      </a>
+    </div>
+  </footer>
 </body>
 </html>

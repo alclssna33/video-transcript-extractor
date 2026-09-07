@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import load_config
@@ -26,6 +27,11 @@ TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 def create_app(*, asr=None, poll_interval: float = 5.0) -> FastAPI:
     config = load_config()  # 자격 증명은 선택 — 없으면 설정 화면에서 입력한다
     app = FastAPI(title="영상 대본 추출기")
+    app.mount(
+        "/static",
+        StaticFiles(directory=str(Path(__file__).parent / "static")),
+        name="static",
+    )
 
     conn = connect(config.db_path)
     init_db(conn)
