@@ -3,7 +3,23 @@
 로컬 영상 파일과 온라인 영상 URL에서 **화자가 구분된 한국어 전사본(.md)** 을 만든다.
 결과 파일은 NotebookLM에 소스로 업로드해 지식화·질의응답에 사용한다.
 
-## 준비
+## 빠른 시작 (Windows)
+
+1. **Python** (https://www.python.org/downloads/ — 설치 시 "Add python.exe to PATH" 체크) 와
+   **ffmpeg** (https://www.gyan.dev/ffmpeg/builds/ — "release essentials" 다운로드 후
+   압축 풀고 `bin` 폴더를 PATH에 추가) 를 먼저 설치한다
+2. **`실행하기.bat`를 더블클릭**한다. 처음 실행할 때만 자동으로 필요한 걸 설치하고,
+   설치가 끝나면 브라우저가 자동으로 열린다. 다음부터는 그냥 다시 더블클릭하면 된다
+3. RTZR 자격 증명(스크립트 추출에만 필요)은 **설정 화면**에서 입력한다
+   - https://developers.rtzr.ai/signup 가입 → https://developers.rtzr.ai/console/ 에서 발급
+     (가입 시 10시간 무료)
+   - **오디오 추출만 할 거라면 자격 증명 없이도 바로 쓸 수 있다**
+
+껐다 켜려면 `실행하기.bat`을 실행한 검은 콘솔 창을 닫으면 된다.
+
+## 직접 설치 (개발자용, 다른 OS 포함)
+
+`실행하기.bat`이 하는 일을 손으로 하는 방법이다.
 
 0. **Python 3.10 이상** (코드 전반에서 `X | None` 타입 문법을 사용함)
 1. **ffmpeg 설치** (ffprobe 포함) 후 PATH에 추가 — `ffmpeg -version`으로 확인
@@ -19,8 +35,6 @@ python -m venv .venv
      client_id / client_secret 발급 (가입 시 10시간 무료)
    - 앱을 실행한 뒤 **설정 화면에서 입력**하면 된다. `.env` 파일을 직접 편집할 필요 없다
    - (원하면 `.env.example`을 `.env`로 복사해 채워도 된다 — 설정 화면 값이 우선한다)
-
-## 실행
 
 ```bash
 .venv/Scripts/python -m uvicorn app.main:create_app --factory --reload --port 8000
@@ -74,7 +88,8 @@ git archive --format=zip --output=../영상대본추출기.zip HEAD
 - `.env` (자격 증명)
 - `data/` (전사본·오디오·작업 DB)
 
-받는 사람은 위 "준비"를 따라 하고, 자기 RTZR 자격 증명을 **설정 화면**에서 입력하면 된다.
+받는 사람은 위 "빠른 시작"을 따라 `실행하기.bat`을 더블클릭하고, 자기 RTZR 자격 증명을
+**설정 화면**에서 입력하면 된다.
 
 ## 테스트
 
